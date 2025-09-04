@@ -204,7 +204,7 @@
 
 ### 互換性
 - **元のBASIC**: Microsoft BASIC M6502 v1.1完全互換
-- **プラットフォーム**: POSIX準拠システム（Linux, macOS, Windows/WSL）
+- **プラットフォーム**: Windows
 - **コンパイラ**: GCC, Clang対応
 
 ### パフォーマンス
