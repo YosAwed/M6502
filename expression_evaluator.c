@@ -19,6 +19,9 @@ extern numeric_value_t func_cos(numeric_value_t x);
 extern numeric_value_t func_tan(numeric_value_t x);
 extern numeric_value_t func_atn(numeric_value_t x);
 extern numeric_value_t func_rnd(basic_state_t* state, numeric_value_t x);
+extern numeric_value_t func_fre(numeric_value_t x);
+extern numeric_value_t func_pos(numeric_value_t x);
+extern numeric_value_t func_peek(uint16_t address);
 
 // 文字列関数の宣言
 extern eval_result_t func_len(const char* str);
@@ -37,6 +40,9 @@ extern numeric_value_t math_multiply(numeric_value_t a, numeric_value_t b);
 extern numeric_value_t math_divide(numeric_value_t a, numeric_value_t b);
 extern numeric_value_t math_power(numeric_value_t base, numeric_value_t exponent);
 extern numeric_value_t math_negate(numeric_value_t a);
+extern numeric_value_t math_and(numeric_value_t a, numeric_value_t b);
+extern numeric_value_t math_or(numeric_value_t a, numeric_value_t b);
+extern numeric_value_t math_not(numeric_value_t a);
 
 // 比較演算の宣言
 extern int math_equal(numeric_value_t a, numeric_value_t b);
@@ -115,29 +121,103 @@ eval_result_t evaluate_expression_with_precedence(basic_state_t* state, parser_s
     while (true) {
         uint16_t save_pos = parser_ptr->position;
         token_t op_token = get_next_token(state, parser_ptr);
-        if (op_token.type != TOKEN_OPERATOR) {
+
+        // Determine operator kind (supports combined <= >= <>, AND/OR keywords)
+        bool is_combined = false; // <=, >=, <>
+        enum { OP_NONE, OP_LE, OP_GE, OP_NE } comb = OP_NONE;
+        char effective_op = 0; // '+', '-', '*', '/', '^', '=', '<', '>', '&', '|'
+        uint8_t op_prec = 0;
+        bool right_assoc = false;
+
+        if (op_token.type == TOKEN_OPERATOR) {
+            const char* txt = parser_ptr->text;
+            uint16_t pos0 = save_pos;
+            char c1 = (pos0 < parser_ptr->length) ? txt[pos0] : '\0';
+            char c2 = (pos0 + 1 < parser_ptr->length) ? txt[pos0 + 1] : '\0';
+            if (c1 == '<' && c2 == '=') { is_combined = true; comb = OP_LE; op_prec = 100; }
+            else if (c1 == '>' && c2 == '=') { is_combined = true; comb = OP_GE; op_prec = 100; }
+            else if (c1 == '<' && c2 == '>') { is_combined = true; comb = OP_NE; op_prec = 100; }
+            else {
+                effective_op = op_token.value.operator;
+                const operator_info_t* op_info = get_operator_info(effective_op);
+                if (!op_info) { parser_ptr->position = save_pos; parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0'; break; }
+                op_prec = op_info->precedence;
+                right_assoc = op_info->right_associative;
+            }
+        } else if (op_token.type == TOKEN_KEYWORD && (op_token.value.keyword_id == 0xA9 || op_token.value.keyword_id == 0xAA)) {
+            // AND / OR
+            effective_op = (op_token.value.keyword_id == 0xA9) ? '&' : '|';
+            const operator_info_t* op_info = get_operator_info(effective_op);
+            if (!op_info) { parser_ptr->position = save_pos; parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0'; break; }
+            op_prec = op_info->precedence;
+            right_assoc = op_info->right_associative;
+        } else {
             parser_ptr->position = save_pos;
             parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
             break;
         }
 
-        const operator_info_t* op_info = get_operator_info(op_token.value.operator);
-        if (!op_info || op_info->precedence < min_precedence) {
+        if (op_prec < min_precedence) {
             parser_ptr->position = save_pos;
             parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
             break;
         }
 
-        uint8_t next_min_precedence = op_info->precedence;
-        if (!op_info->right_associative) {
+        uint8_t next_min_precedence = op_prec;
+        if (!right_assoc) {
             next_min_precedence++;
         }
 
         eval_result_t right = evaluate_expression_with_precedence(state, parser_ptr, next_min_precedence);
         if (has_error(state)) return right;
 
-        left = perform_operation(state, left, op_token.value.operator, right);
-        if (has_error(state)) return left;
+        if (is_combined) {
+            eval_result_t res = {0};
+            res.type = 0;
+            if (left.type == 0 && right.type == 0) {
+                switch (comb) {
+                    case OP_LE: res.value.num = double_to_numeric(math_less_equal(left.value.num, right.value.num)); break;
+                    case OP_GE: res.value.num = double_to_numeric(math_greater_equal(left.value.num, right.value.num)); break;
+                    case OP_NE: res.value.num = double_to_numeric(math_not_equal(left.value.num, right.value.num)); break;
+                    default: break;
+                }
+            } else if (left.type == 1 && right.type == 1) {
+                switch (comb) {
+                    case OP_LE: res.value.num = double_to_numeric(string_less_equal(left.value.str.data, right.value.str.data)); break;
+                    case OP_GE: res.value.num = double_to_numeric(string_greater_equal(left.value.str.data, right.value.str.data)); break;
+                    case OP_NE: res.value.num = double_to_numeric(string_not_equal(left.value.str.data, right.value.str.data)); break;
+                    default: break;
+                }
+            } else {
+                set_error(state, ERR_TYPE_MISMATCH, "Type mismatch in comparison");
+                // free any strings
+                if (left.type == 1 && left.value.str.data) free(left.value.str.data);
+                if (right.type == 1 && right.value.str.data) free(right.value.str.data);
+                return res;
+            }
+            // clean up any string operands as perform_operation would
+            if (left.type == 1 && left.value.str.data) free(left.value.str.data);
+            if (right.type == 1 && right.value.str.data) free(right.value.str.data);
+            left = res;
+            if (has_error(state)) return left;
+        } else if (effective_op == '&' || effective_op == '|') {
+            // Bitwise AND/OR (numeric only)
+            if (left.type != 0 || right.type != 0) {
+                set_error(state, ERR_TYPE_MISMATCH, "AND/OR require numeric operands");
+                // free any strings
+                if (left.type == 1 && left.value.str.data) free(left.value.str.data);
+                if (right.type == 1 && right.value.str.data) free(right.value.str.data);
+                return left;
+            }
+            eval_result_t res = {0};
+            res.type = 0;
+            if (effective_op == '&') res.value.num = math_and(left.value.num, right.value.num);
+            else res.value.num = math_or(left.value.num, right.value.num);
+            left = res;
+        } else {
+            left = perform_operation(state, left, effective_op, right);
+            if (has_error(state)) return left;
+        }
     }
 
     return left;
@@ -167,7 +247,15 @@ eval_result_t evaluate_primary(basic_state_t* state, parser_state_t* parser_ptr)
             break;
             
         case TOKEN_KEYWORD:
-            result = evaluate_function(state, parser_ptr, token.value.keyword_id);
+            if (token.value.keyword_id == 0xA2) { // NOT (prefix, precedence ~90)
+                eval_result_t rhs = evaluate_expression_with_precedence(state, parser_ptr, 90);
+                if (has_error(state)) return rhs;
+                if (rhs.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "NOT requires numeric operand"); return rhs; }
+                result.type = 0;
+                result.value.num = math_not(rhs.value.num);
+            } else {
+                result = evaluate_function(state, parser_ptr, token.value.keyword_id);
+            }
             break;
             
         case TOKEN_OPERATOR:
@@ -361,6 +449,58 @@ eval_result_t evaluate_function(basic_state_t* state, parser_state_t* parser_ptr
             switch (function_id) {
                 case 0xC1: result = func_chr((int)numeric_to_double(arg.value.num)); break;
                 case 0xBE: result = func_str(arg.value.num); break;
+            }
+            break;
+        }
+
+        case 0xC2: // LEFT$
+        case 0xC3: // RIGHT$
+        case 0xC4: // MID$
+        {
+            // String first argument
+            eval_result_t s = evaluate_expression(state, parser_ptr);
+            if (has_error(state) || s.type != 1) { set_error(state, ERR_TYPE_MISMATCH, "String argument expected"); return result; }
+            // Comma
+            token_t comma = get_next_token(state, parser_ptr);
+            if (comma.type != TOKEN_DELIMITER || comma.value.operator != ',') { set_error(state, ERR_SYNTAX, ", expected"); if (s.value.str.data) free(s.value.str.data); return result; }
+            // Numeric parameter(s)
+            eval_result_t p1 = evaluate_expression(state, parser_ptr);
+            if (has_error(state) || p1.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric argument expected"); if (s.value.str.data) free(s.value.str.data); return result; }
+            if (function_id == 0xC4) {
+                // MID$(s$, start, len)
+                token_t comma2 = get_next_token(state, parser_ptr);
+                if (comma2.type != TOKEN_DELIMITER || comma2.value.operator != ',') { set_error(state, ERR_SYNTAX, ", expected"); if (s.value.str.data) free(s.value.str.data); return result; }
+                eval_result_t p2 = evaluate_expression(state, parser_ptr);
+                if (has_error(state) || p2.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric argument expected"); if (s.value.str.data) free(s.value.str.data); return result; }
+                int start = (int)numeric_to_double(p1.value.num);
+                int len = (int)numeric_to_double(p2.value.num);
+                result = func_mid(s.value.str.data, start, len);
+            } else if (function_id == 0xC2) {
+                int n = (int)numeric_to_double(p1.value.num);
+                result = func_left(s.value.str.data, n);
+            } else { // RIGHT$
+                int n = (int)numeric_to_double(p1.value.num);
+                result = func_right(s.value.str.data, n);
+            }
+            if (s.value.str.data) free(s.value.str.data);
+            break;
+        }
+
+        case 0xBC: // PEEK
+        case 0xB2: // FRE
+        case 0xB3: // POS
+        {
+            eval_result_t arg = evaluate_expression(state, parser_ptr);
+            if (has_error(state) || arg.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric argument expected"); return result; }
+            result.type = 0;
+            switch (function_id) {
+                case 0xBC: {
+                    uint16_t addr = (uint16_t)numeric_to_double(arg.value.num);
+                    result.value.num = func_peek(addr);
+                    break;
+                }
+                case 0xB2: result.value.num = func_fre(arg.value.num); break;
+                case 0xB3: result.value.num = func_pos(arg.value.num); break;
             }
             break;
         }

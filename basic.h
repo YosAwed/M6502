@@ -232,6 +232,7 @@ int cmd_data(basic_state_t* state, parser_state_t* parser);
 int cmd_read(basic_state_t* state, parser_state_t* parser);
 int cmd_restore(basic_state_t* state, parser_state_t* parser);
 int cmd_input(basic_state_t* state, parser_state_t* parser);
+int cmd_input_ex(basic_state_t* state, parser_state_t* parser);
 int cmd_clear(basic_state_t* state, parser_state_t* parser);
 int cmd_stop(basic_state_t* state, parser_state_t* parser);
 int cmd_end(basic_state_t* state, parser_state_t* parser);

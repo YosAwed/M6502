@@ -373,7 +373,7 @@ int basic_execute_line(basic_state_t* state, const char* line) {
                 case 0x83: rc = cmd_data(state, &parser); break;           // DATA
                 case 0x86: rc = cmd_read(state, &parser); break;           // READ
                 case 0x8B: rc = cmd_restore(state, &parser); break;        // RESTORE
-                case 0x84: rc = cmd_input(state, &parser); break;          // INPUT
+                case 0x84: rc = cmd_input_ex(state, &parser); break;          // INPUT
                 case 0x9A: rc = cmd_clear(state, &parser); break;          // CLEAR
                 case 0x8F: rc = cmd_stop(state, &parser); break;           // STOP
                 case 0x80: rc = cmd_end(state, &parser); break;            // END

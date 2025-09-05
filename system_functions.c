@@ -1,5 +1,6 @@
 #include "basic.h"
 #include <time.h>
+#include <ctype.h>
 
 // 外部関数の宣言
 extern numeric_value_t double_to_numeric(double d);
@@ -90,7 +91,7 @@ int cmd_input(basic_state_t* state, parser_state_t* parser_ptr) {
         has_prompt = true;
         
         token_t sep_token = get_next_token(state, parser_ptr);
-        if (sep_token.type == TOKEN_DELIMITER && sep_token.value.operator == ';') {
+        if (sep_token.type == TOKEN_DELIMITER && (sep_token.value.operator == ';' || sep_token.value.operator == ',')) {
             // プロンプト付き
         } else {
             // プロンプトなし、変数として扱う
@@ -173,7 +174,16 @@ int cmd_input(basic_state_t* state, parser_state_t* parser_ptr) {
                 var->value.str.length = strlen(value_str);
             }
         } else {
-            var->value.num = string_to_number(value_str);
+            // strict numeric parse: require entire field to be a number
+            char* endptr = NULL;
+            double v = strtod(value_str, &endptr);
+            while (endptr && *endptr && isspace((unsigned char)*endptr)) endptr++;
+            if (!endptr || *endptr != '\0' || strlen(value_str) == 0) {
+                set_error(state, ERR_TYPE_MISMATCH, "Numeric expected");
+                free(var_token.value.string);
+                return -1;
+            }
+            var->value.num = double_to_numeric(v);
         }
         
         free(var_token.value.string);
