@@ -1,0 +1,14 @@
+    if (condition_true) {
+        // 条件が真の場合、THEN以降を実行
+        // 次のトークンが行番号かチェック
+        token_t next_token = get_next_token(state, parser_ptr);
+        if (next_token.type == TOKEN_NUMBER) {
+            // GOTO文として処理
+            uint16_t line_num = (uint16_t)numeric_to_double(next_token.value.number);
+            return cmd_goto_line(state, line_num);
+        } else {
+            // 文として実行（実装簡略化のため、現在は未対応）
+            set_error(state, ERR_UNDEF_STATEMENT, "Statement after THEN not implemented");
+            return -1;
+        }
+    }

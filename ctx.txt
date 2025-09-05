@@ -1,0 +1,12 @@
+    while (true) {
+        token_t op_token = get_next_token(state, parser_ptr);
+        if (op_token.type != TOKEN_OPERATOR) {
+            // 演算子でない場合は終了
+            break;
+        }
+        
+        const operator_info_t* op_info = get_operator_info(op_token.value.operator);
+        if (!op_info || op_info->precedence < min_precedence) {
+            // 優先度が低い場合は終了
+            break;
+        }
