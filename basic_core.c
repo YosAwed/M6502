@@ -149,12 +149,31 @@ void print_error(basic_state_t* state) {
 // numeric conversion helpers are implemented in utility_functions.c
 
 // 変数検索
+// Build 3-byte canonical signature for variable names: 2 significant chars + optional '$'
+static void build_name_signature(const char* name, char sig[3]) {
+    sig[0] = sig[1] = sig[2] = 0;
+    if (!name) return;
+    int i = 0;
+    for (const char* p = name; *p && i < 2; ++p) {
+        unsigned char c = (unsigned char)*p;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            if (c >= 'a' && c <= 'z') c = (unsigned char)(c - 'a' + 'A');
+            sig[i++] = (char)c;
+        }
+    }
+    for (const char* p = name; *p; ++p) {
+        if (*p == '$') { sig[2] = '$'; break; }
+    }
+}
+
 variable_t* find_variable(basic_state_t* state, const char* name) {
     if (!state || !name) return NULL;
-    
+    char key[3];
+    build_name_signature(name, key);
+
     variable_t* var = state->variables;
     while (var) {
-        if (strcmp(var->name, name) == 0) {
+        if (memcmp(var->name, key, 3) == 0) {
             return var;
         }
         var = var->next;
@@ -178,7 +197,7 @@ variable_t* create_variable(basic_state_t* state, const char* name, variable_typ
     }
     
     memset(var, 0, sizeof(variable_t));
-    strncpy(var->name, name, sizeof(var->name) - 1);
+    build_name_signature(name, var->name);
     var->type = type;
     
     // リストに追加

@@ -394,6 +394,13 @@ int basic_execute_line(basic_state_t* state, const char* line) {
                     set_error(state, ERR_UNDEF_STATEMENT, "Command not implemented");
                     rc = -1;
             }
+        } else if (token.type == TOKEN_VARIABLE) {
+            // LET 省略対応: 変数で始まる行は代入文として扱う
+            // トークン開始位置に巻き戻して LET パーサに委譲
+            uint16_t rewind_pos = token.position;
+            parser.position = rewind_pos;
+            parser.current_char = (parser.position < parser.length) ? parser.text[parser.position] : '\0';
+            rc = cmd_let(state, &parser);
         } else if (token.type == TOKEN_EOF || token.type == TOKEN_EOL) {
             break;
         } else {
@@ -421,6 +428,22 @@ int basic_execute_line(basic_state_t* state, const char* line) {
 int cmd_print(basic_state_t* state, parser_state_t* parser) {
     bool trailing_semicolon = false;
     bool first = true;
+    const int zone = 14; // Microsoft BASIC print zone width
+
+    // local helper to output and track terminal column
+    auto void put_text_and_track(const char* s) {
+        if (!s) return;
+        fputs(s, stdout);
+        // update column position (naively count bytes)
+        size_t n = strlen(s);
+        // wrap handling is omitted for simplicity; track modulo line width
+        state->trmpos = (uint8_t)((state->trmpos + (unsigned)n) % 255);
+    };
+    auto void put_spaces_and_track(int n) {
+        if (n <= 0) return;
+        for (int i = 0; i < n; i++) putchar(' ');
+        state->trmpos = (uint8_t)((state->trmpos + (unsigned)n) % 255);
+    };
     while (1) {
         // Allow bare EOL
         uint16_t pos0 = parser->position;
@@ -430,8 +453,15 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
         }
         // handle separators directly
         if (peek.type == TOKEN_DELIMITER && (peek.value.operator == ',' || peek.value.operator == ';')) {
-            if (peek.value.operator == ',') { printf("\t"); }
-            else { trailing_semicolon = true; }
+            if (peek.value.operator == ',') {
+                int spaces = zone - (state->trmpos % zone);
+                if (spaces == 0) spaces = zone; // advance to next zone
+                put_spaces_and_track(spaces);
+            } else {
+                // Semicolon: separate fields tightly; add a single space for readability like classic BASIC
+                put_spaces_and_track(1);
+                trailing_semicolon = true;
+            }
             first = false;
             continue;
         }
@@ -443,8 +473,24 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             if (has_error(state) || n.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric expected in TAB"); return -1; }
             token_t close = get_next_token(state, parser);
             if (close.type != TOKEN_DELIMITER || close.value.operator != ')') { set_error(state, ERR_SYNTAX, ") expected after TAB"); return -1; }
+            int target = (int)numeric_to_double(n.value.num);
+            if (target < 0) target = 0;
+            if (target > 255) target = 255;
+            int spaces = target - state->trmpos;
+            if (spaces > 0) put_spaces_and_track(spaces);
+            first = false; trailing_semicolon = false; continue;
+        }
+        // SPC(n)
+        if (peek.type == TOKEN_KEYWORD && peek.value.keyword_id == 0xA0) {
+            token_t open = get_next_token(state, parser);
+            if (open.type != TOKEN_DELIMITER || open.value.operator != '(') { set_error(state, ERR_SYNTAX, "( expected after SPC"); return -1; }
+            eval_result_t n = evaluate_expression(state, parser);
+            if (has_error(state) || n.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric expected in SPC"); return -1; }
+            token_t close = get_next_token(state, parser);
+            if (close.type != TOKEN_DELIMITER || close.value.operator != ')') { set_error(state, ERR_SYNTAX, ") expected after SPC"); return -1; }
             int count = (int)numeric_to_double(n.value.num);
-            for (int i=0;i<count;i++) putchar(' ');
+            if (count < 0) count = 0;
+            put_spaces_and_track(count);
             first = false; trailing_semicolon = false; continue;
         }
         // Not a simple separator: rewind and evaluate expression
@@ -453,24 +499,36 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
         eval_result_t val = evaluate_expression(state, parser);
         if (has_error(state)) return -1;
         if (val.type == 1) {
-            printf("%s", val.value.str.data ? val.value.str.data : "");
+            put_text_and_track(val.value.str.data ? val.value.str.data : "");
             if (val.value.str.data) free(val.value.str.data);
         } else {
-            printf("%g", numeric_to_double(val.value.num));
+            char buf[64];
+            // emulate BASIC formatting loosely with %g
+            snprintf(buf, sizeof(buf), "%g", numeric_to_double(val.value.num));
+            put_text_and_track(buf);
         }
         first = false; trailing_semicolon = false;
         // Check for separator
         uint16_t save = parser->position;
         token_t sep = get_next_token(state, parser);
         if (sep.type == TOKEN_DELIMITER && (sep.value.operator == ',' || sep.value.operator == ';')) {
-            if (sep.value.operator == ';') trailing_semicolon = true; else trailing_semicolon = false;
+            if (sep.value.operator == ',') {
+                int spaces = zone - (state->trmpos % zone);
+                if (spaces == 0) spaces = zone;
+                put_spaces_and_track(spaces);
+                trailing_semicolon = false;
+            } else {
+                // Semicolon: add one space between items
+                put_spaces_and_track(1);
+                trailing_semicolon = true;
+            }
             continue;
         }
         parser->position = save;
         parser->current_char = (parser->position < parser->length) ? parser->text[parser->position] : '\0';
         break;
     }
-    if (!trailing_semicolon) putchar('\n');
+    if (!trailing_semicolon) { putchar('\n'); state->trmpos = 0; }
     return 0;
 }
 

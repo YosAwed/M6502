@@ -40,110 +40,58 @@ int cmd_goto(basic_state_t* state, parser_state_t* parser_ptr) {
 }
 
 int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
-    // Find THEN and evaluate a minimal condition before it
-    uint16_t expr_start = parser_ptr->position;
-    const char* txt = parser_ptr->text;
-    uint16_t len = parser_ptr->length;
-    uint16_t i = parser_ptr->position;
-    bool found_then = false;
-    while (i + 3 < len) {
-        if (toupper((unsigned char)txt[i])=='T' && toupper((unsigned char)txt[i+1])=='H' &&
-            toupper((unsigned char)txt[i+2])=='E' && toupper((unsigned char)txt[i+3])=='N') {
-            bool left_ok = (i == 0) || !isalnum((unsigned char)txt[i-1]);
-            bool right_ok = (i + 4 >= len) || !isalnum((unsigned char)txt[i+4]);
-            if (left_ok && right_ok) { found_then = true; break; }
-        }
-        i++;
-    }
-    if (!found_then) { set_error(state, ERR_SYNTAX, "THEN expected in IF statement"); return -1; }
+    // Evaluate full expression for condition
+    eval_result_t cond = evaluate_expression(state, parser_ptr);
+    if (has_error(state)) return -1;
 
-    // Simple condition parser within [expr_start, i)
-    parser_state_t p = *parser_ptr;
-    p.position = expr_start;
-    p.length = i;
-    p.current_char = (p.position < p.length) ? p.text[p.position] : '\0';
-
-    // Read LHS
-    token_t lhs = get_next_token(state, &p);
-    bool lhs_is_num = false, lhs_is_str = false;
-    double lhs_num = 0.0; const char* lhs_str = NULL; char* lhs_str_owned = NULL;
-    if (lhs.type == TOKEN_NUMBER) { lhs_is_num = true; lhs_num = numeric_to_double(lhs.value.number); }
-    else if (lhs.type == TOKEN_STRING) { lhs_is_str = true; lhs_str = lhs.value.string; lhs_str_owned = lhs.value.string; }
-    else if (lhs.type == TOKEN_VARIABLE) {
-        variable_t* v = find_variable(state, lhs.value.string);
-        if (v && v->type == VAR_NUMERIC) { lhs_is_num = true; lhs_num = numeric_to_double(v->value.num); }
-        else if (v && v->type == VAR_STRING) { lhs_is_str = true; lhs_str = v->value.str.data ? v->value.str.data : ""; }
-        else { lhs_is_num = true; lhs_num = 0.0; }
-        free(lhs.value.string);
-    } else {
-        set_error(state, ERR_SYNTAX, "Invalid IF condition");
-        if (lhs.type == TOKEN_STRING && lhs_str_owned) free(lhs_str_owned);
+    // Expect THEN keyword
+    token_t then_tok = get_next_token(state, parser_ptr);
+    if (!(then_tok.type == TOKEN_KEYWORD && then_tok.value.keyword_id == 0xA1)) { // THEN
+        set_error(state, ERR_SYNTAX, "THEN expected in IF statement");
         return -1;
     }
 
-    // Peek operator
-    token_t op = get_next_token(state, &p);
-    bool has_op = (op.type == TOKEN_OPERATOR && (op.value.operator=='=' || op.value.operator=='<' || op.value.operator=='>' ));
+    // Truthiness
     bool truthy = false;
-    if (!has_op) {
-        // No operator: truthiness of LHS
-        if (lhs_is_num) truthy = (lhs_num != 0.0); else truthy = (lhs_str && lhs_str[0] != '\0');
-    } else {
-        // RHS
-        token_t rhs = get_next_token(state, &p);
-        bool rhs_is_num = false, rhs_is_str = false; double rhs_num = 0.0; const char* rhs_str = NULL; char* rhs_str_owned = NULL;
-        if (rhs.type == TOKEN_NUMBER) { rhs_is_num = true; rhs_num = numeric_to_double(rhs.value.number); }
-        else if (rhs.type == TOKEN_STRING) { rhs_is_str = true; rhs_str = rhs.value.string; rhs_str_owned = rhs.value.string; }
-        else if (rhs.type == TOKEN_VARIABLE) {
-            variable_t* v2 = find_variable(state, rhs.value.string);
-            if (v2 && v2->type == VAR_NUMERIC) { rhs_is_num = true; rhs_num = numeric_to_double(v2->value.num); }
-            else if (v2 && v2->type == VAR_STRING) { rhs_is_str = true; rhs_str = v2->value.str.data ? v2->value.str.data : ""; }
-            else { rhs_is_num = true; rhs_num = 0.0; }
-            free(rhs.value.string);
-        } else {
-            set_error(state, ERR_SYNTAX, "Invalid IF condition RHS");
-            if (lhs_str_owned) free(lhs_str_owned);
-            return -1;
-        }
-        if (lhs_is_num && rhs_is_num) {
-            if (op.value.operator=='=') truthy = (lhs_num == rhs_num);
-            else if (op.value.operator=='<') truthy = (lhs_num < rhs_num);
-            else if (op.value.operator=='>') truthy = (lhs_num > rhs_num);
-        } else if (lhs_is_str && rhs_is_str) {
-            int cmp = strcmp(lhs_str ? lhs_str : "", rhs_str ? rhs_str : "");
-            if (op.value.operator=='=') truthy = (cmp == 0);
-            else if (op.value.operator=='<') truthy = (cmp < 0);
-            else if (op.value.operator=='>') truthy = (cmp > 0);
-        } else {
-            set_error(state, ERR_TYPE_MISMATCH, "Type mismatch in IF");
-            if (lhs_str_owned) free(lhs_str_owned);
-            if (rhs_str_owned) free(rhs_str_owned);
-            return -1;
-        }
-        if (rhs_str_owned) free(rhs_str_owned);
+    if (cond.type == 0) {
+        truthy = (numeric_to_double(cond.value.num) != 0.0);
+    } else if (cond.type == 1) {
+        truthy = (cond.value.str.data && cond.value.str.data[0] != '\0');
+        if (cond.value.str.data) free(cond.value.str.data);
     }
-    if (lhs_str_owned) free(lhs_str_owned);
 
-    // Advance real parser to after THEN
-    parser_ptr->position = i + 4;
-    parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
-    parser_skip_spaces(parser_ptr);
+    // Helper: for false branch, skip only the immediate statement after THEN up to ':' or EOL
+    if (!truthy) {
+        while (1) {
+            uint16_t save = parser_ptr->position;
+            token_t t = get_next_token(state, parser_ptr);
+            if (t.type == TOKEN_EOF || t.type == TOKEN_EOL) break;
+            if (t.type == TOKEN_DELIMITER && t.value.operator == ':') {
+                // leave ':' for outer loop to consume
+                parser_ptr->position = save;
+                parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
+                break;
+            }
+            if (save == parser_ptr->position) break;
+        }
+        return 0;
+    }
 
-    if (!truthy) return 0;
-
-    // Execute single statement following THEN
-    token_t next = get_next_token(state, parser_ptr);
-    if (next.type == TOKEN_NUMBER) {
-        uint16_t line = (uint16_t)numeric_to_double(next.value.number);
+    // True: execute exactly one immediate statement following THEN
+    uint16_t stmt_start = parser_ptr->position;
+    token_t t = get_next_token(state, parser_ptr);
+    if (t.type == TOKEN_NUMBER) {
+        uint16_t line = (uint16_t)numeric_to_double(t.value.number);
         return cmd_goto_line(state, line);
-    } else if (next.type == TOKEN_KEYWORD) {
-        int rc = 0;
-        switch (next.value.keyword_id) {
+    }
+    int rc = 0;
+    if (t.type == TOKEN_KEYWORD) {
+        switch (t.value.keyword_id) {
             case 0x97: rc = cmd_print(state, parser_ptr); break;          // PRINT
             case 0x87: rc = cmd_let(state, parser_ptr); break;            // LET
             case 0x81: rc = cmd_for(state, parser_ptr); break;            // FOR
             case 0x82: rc = cmd_next(state, parser_ptr); break;           // NEXT
-            case 0x8A: rc = cmd_if(state, parser_ptr); break;             // IF (nested)
+            case 0x8A: rc = cmd_if(state, parser_ptr); break;             // nested IF
             case 0x88: rc = cmd_goto(state, parser_ptr); break;           // GOTO
             case 0x8C: rc = cmd_gosub(state, parser_ptr); break;          // GOSUB
             case 0x8D: rc = cmd_return(state, parser_ptr); break;         // RETURN
@@ -152,7 +100,7 @@ int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
             case 0x83: rc = cmd_data(state, parser_ptr); break;           // DATA
             case 0x86: rc = cmd_read(state, parser_ptr); break;           // READ
             case 0x8B: rc = cmd_restore(state, parser_ptr); break;        // RESTORE
-            case 0x84: rc = cmd_input(state, parser_ptr); break;          // INPUT
+            case 0x84: rc = cmd_input_ex(state, parser_ptr); break;       // INPUT
             case 0x9A: rc = cmd_clear(state, parser_ptr); break;          // CLEAR
             case 0x8F: rc = cmd_stop(state, parser_ptr); break;           // STOP
             case 0x80: rc = cmd_end(state, parser_ptr); break;            // END
@@ -162,16 +110,25 @@ int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
             case 0x91: rc = cmd_null(state, parser_ptr); break;           // NULL
             case 0x95: rc = cmd_def(state, parser_ptr); break;            // DEF
             case 0x98: rc = cmd_cont(state, parser_ptr); break;           // CONT
+            case 0x99: basic_list_program(state); rc = 0; break;          // LIST
+            case 0x9C: basic_new_program(state); rc = 0; break;           // NEW
             case 0x9D: set_error(state, ERR_UNDEF_STATEMENT, "TAB not supported as statement"); rc = -1; break;
             default:
                 set_error(state, ERR_UNDEF_STATEMENT, "Command not implemented after THEN");
                 rc = -1;
         }
-        return rc;
+    } else if (t.type == TOKEN_VARIABLE) {
+        // LET omitted
+        parser_ptr->position = stmt_start;
+        parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
+        rc = cmd_let(state, parser_ptr);
+    } else if (t.type == TOKEN_EOF || t.type == TOKEN_EOL) {
+        rc = 0;
     } else {
         set_error(state, ERR_SYNTAX, "Invalid statement after THEN");
-        return -1;
+        rc = -1;
     }
+    return rc;
 }
 
 int cmd_gosub(basic_state_t* state, parser_state_t* parser_ptr) {
