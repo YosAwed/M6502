@@ -15,3 +15,7 @@ _*.c
 .DS_Store
 
 doc/
+
+*.txt
+
+*.asm
