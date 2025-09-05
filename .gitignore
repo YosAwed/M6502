@@ -1,0 +1,15 @@
+# build artifacts
+basic
+basic.exe
+obj/
+*.o
+
+# temp files
+_*.txt
+_*.c
+
+# stray snapshot dir
+20250905/
+
+# OS
+.DS_Store
