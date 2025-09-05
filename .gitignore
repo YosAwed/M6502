@@ -13,3 +13,5 @@ _*.c
 
 # OS
 .DS_Store
+
+doc/
