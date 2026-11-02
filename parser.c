@@ -1,5 +1,6 @@
 #include "basic.h"
 #include <ctype.h>
+#include <limits.h>
 
 // 外部関数の宣言
 numeric_value_t double_to_numeric(double d);
@@ -111,7 +112,10 @@ static bool parse_number(parser_state_t* parser, numeric_value_t* result) {
         
         int exponent = 0;
         while (isdigit(parser->current_char)) {
-            exponent = exponent * 10 + (parser->current_char - '0');
+            int digit = parser->current_char - '0';
+            // 符号付き整数のオーバーフローを防ぐ。
+            if (exponent > (INT_MAX - digit) / 10) return false;
+            exponent = exponent * 10 + digit;
             advance_parser(parser);
         }
         
@@ -223,7 +227,9 @@ token_t get_next_token(basic_state_t* state, parser_state_t* parser) {
     if (parser->current_char == '"') {
         token.type = TOKEN_STRING;
         if (!parse_string(parser, &token.value.string)) {
+            // NULLの文字列ポインタを式評価へ渡さない。
             set_error(state, ERR_SYNTAX, "Unterminated string");
+            token.type = TOKEN_EOF;
         }
         return token;
     }
@@ -397,7 +403,18 @@ int basic_execute_line(basic_state_t* state, const char* line) {
                     set_error(state, ERR_SYNTAX, "Misplaced keyword"); rc = -1; break;
                 case 0x99: basic_list_program(state); rc = 0; break;       // LIST
                 case 0x9C: basic_new_program(state); rc = 0; break;        // NEW
-                case 0x89: rc = basic_run_program(state); break;           // RUN
+                case 0x89: // RUN
+                    if (!state->immediate_mode && state->running) {
+                        // 新しいRUNに以前のGOSUB/FORフレームを持ち越さない。
+                        basic_clear_control_stacks(state);
+                        // 実行中のRUNは再帰呼び出しせず、実行位置だけを戻す。
+                        state->current_line = state->program_start;
+                        state->current_position = 0;
+                        state->jump_pending = true;
+                    } else {
+                        rc = basic_run_program(state);
+                    }
+                    break;
                 case 0x8E: rc = cmd_rem(state, &parser); break;            // REM
                 default:
                     set_error(state, ERR_UNDEF_STATEMENT, "Command not implemented");
@@ -407,17 +424,22 @@ int basic_execute_line(basic_state_t* state, const char* line) {
             // LET 省略対応: 変数で始まる行は代入文として扱う
             // トークン開始位置に巻き戻して LET パーサに委譲
             uint16_t rewind_pos = token.position;
+            free(token.value.string);
             parser.position = rewind_pos;
             parser.current_char = (parser.position < parser.length) ? parser.text[parser.position] : '\0';
             rc = cmd_let(state, &parser);
         } else if (token.type == TOKEN_EOF || token.type == TOKEN_EOL) {
             break;
         } else {
+            if (token.type == TOKEN_STRING) free(token.value.string);
             set_error(state, ERR_SYNTAX, "Invalid statement");
             rc = -1;
         }
 
         if (rc != 0 || has_error(state)) return rc;
+        // STOP/END の後に同じ行の後続文を実行しない。
+        if (!state->immediate_mode && !state->running) return 0;
+        if (state->jump_pending) return 0;
 
         // After a statement, optionally consume ':' and continue; otherwise stop at EOL/EOF
         uint16_t save_pos = parser.position;
@@ -425,6 +447,9 @@ int basic_execute_line(basic_state_t* state, const char* line) {
         if (sep.type == TOKEN_DELIMITER && sep.value.operator == ':') {
             continue; // next statement on the same line
         }
+        // 区切りでなかったトークンの所有メモリを解放する。
+        if (sep.type == TOKEN_STRING || sep.type == TOKEN_VARIABLE)
+            free(sep.value.string);
         // put back non-separator token
         parser.position = save_pos;
         parser.current_char = (parser.position < parser.length) ? parser.text[parser.position] : '\0';
@@ -499,6 +524,14 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             put_spaces_and_track(state, count);
             trailing_semicolon = false; continue;
         }
+        // 先読みで確保した文字列は、巻き戻す前に解放する。
+        if (has_error(state)) {
+            if (peek.type == TOKEN_STRING || peek.type == TOKEN_VARIABLE)
+                free(peek.value.string);
+            return -1;
+        }
+        if (peek.type == TOKEN_STRING || peek.type == TOKEN_VARIABLE)
+            free(peek.value.string);
         // Not a simple separator: rewind and evaluate expression
         parser->position = pos0;
         parser->current_char = (parser->position < parser->length) ? parser->text[parser->position] : '\0';
@@ -530,6 +563,8 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             }
             continue;
         }
+        if (sep.type == TOKEN_STRING || sep.type == TOKEN_VARIABLE)
+            free(sep.value.string);
         parser->position = save;
         parser->current_char = (parser->position < parser->length) ? parser->text[parser->position] : '\0';
         break;
@@ -557,7 +592,13 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
         while (index_count < MAX_ARRAY_DIMENSIONS) {
             eval_result_t idx = evaluate_expression(state, parser);
             if (has_error(state) || idx.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric index expected"); free(var_token.value.string); return -1; }
-            indices[index_count++] = (uint16_t)numeric_to_double(idx.value.num);
+            double index = numeric_to_double(idx.value.num);
+            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX) {
+                set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
+                free(var_token.value.string);
+                return -1;
+            }
+            indices[index_count++] = (uint16_t)index;
             token_t sep = get_next_token(state, parser);
             if (sep.type == TOKEN_DELIMITER && sep.value.operator == ',') {
                 continue;
@@ -574,6 +615,9 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
         eval_result_t value = evaluate_expression(state, parser);
         if (has_error(state)) { free(var_token.value.string); return -1; }
         int rc = assign_array_element(state, var_token.value.string, indices, index_count, value);
+        // 成功した文字列代入のみ配列へ所有権が移る。
+        if (rc != 0 && value.type == 1)
+            free(value.value.str.data);
         free(var_token.value.string);
         return rc;
     }
@@ -597,7 +641,12 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
     if (!var) { if (value.type==1 && value.value.str.data) free(value.value.str.data); free(var_token.value.string); return -1; }
     
     if (is_string) {
-        if (value.type != 1) { set_error(state, ERR_TYPE_MISMATCH, NULL); if (value.value.str.data) free(value.value.str.data); free(var_token.value.string); return -1; }
+        if (value.type != 1) {
+            // 数値結果を文字列ポインタとしてfreeしてはいけない。
+            set_error(state, ERR_TYPE_MISMATCH, NULL);
+            free(var_token.value.string);
+            return -1;
+        }
         if (var->value.str.data) free(var->value.str.data);
         var->value.str.data = value.value.str.data; // take ownership
         var->value.str.length = var->value.str.data ? (uint16_t)strlen(var->value.str.data) : 0;
@@ -610,31 +659,46 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
     return 0;
 }
 
-// プログラム実行
-int basic_run_program(basic_state_t* state) {
-    if (!state) return -1;
-    
+// RUNとCONTで共通の非再帰実行ループを利用する。
+static int execute_program_loop(basic_state_t* state) {
     bool previous_mode = state->immediate_mode;
     state->immediate_mode = false;
-    state->current_line = state->program_start;
-    state->current_position = 0;
     state->running = true;
-    
+
     while (state->current_line && state->running && !has_error(state)) {
         program_line_t* before = state->current_line;
         int result = basic_execute_line(state, state->current_line->text);
         if (result != 0 || has_error(state) || !state->running) break;
-        
-        // If resuming mid-line (state->current_position set), or current_line changed, don't auto-advance
-        if (state->current_line == before && state->current_position == 0) {
-            state->current_line = state->current_line->next;
+
+        if (state->jump_pending) {
+            state->jump_pending = false;
+            continue;
         }
+        if (state->current_line == before && state->current_position == 0)
+            state->current_line = state->current_line->next;
     }
-    
+
     state->running = false;
     state->immediate_mode = previous_mode;
+    if (has_error(state) || !state->current_line)
+        state->can_continue = false;
     return has_error(state) ? -1 : 0;
 }
 
+// 先頭からのRUNは停止位置を無効にする。
+int basic_run_program(basic_state_t* state) {
+    if (!state) return -1;
+    state->current_line = state->program_start;
+    state->current_position = 0;
+    state->jump_pending = false;
+    state->can_continue = false;
+    basic_clear_control_stacks(state);
+    return execute_program_loop(state);
+}
 
-
+// STOPの保存位置からのCONT用。
+int basic_continue_program(basic_state_t* state) {
+    if (!state || !state->current_line) return -1;
+    state->jump_pending = false;
+    return execute_program_loop(state);
+}

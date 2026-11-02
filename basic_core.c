@@ -36,8 +36,14 @@ void basic_cleanup(basic_state_t* state) {
         if (var->type == VAR_STRING && var->value.str.data) {
             free(var->value.str.data);
         } else if (var->type == VAR_ARRAY_NUMERIC || var->type == VAR_ARRAY_STRING) {
-            if (var->value.array.data) free(var->value.array.data);
-            if (var->value.array.dimensions) free(var->value.array.dimensions);
+            if (var->type == VAR_ARRAY_STRING && var->value.array.data) {
+                // 文字列配列の各要素も個別に確保されている。
+                char** values = (char**)var->value.array.data;
+                for (uint16_t i = 0; i < var->value.array.total_elements; i++)
+                    free(values[i]);
+            }
+            free(var->value.array.data);
+            free(var->value.array.dimensions);
         }
         free(var);
         var = next;
@@ -190,7 +196,14 @@ variable_t* create_variable(basic_state_t* state, const char* name, variable_typ
     
     // 既存変数チェック
     variable_t* existing = find_variable(state, name);
-    if (existing) return existing;
+    if (existing) {
+        // 既存配列をスカラーとして上書きすると共用体のポインタが壊れる。
+        if (existing->type != type) {
+            set_error(state, ERR_TYPE_MISMATCH, NULL);
+            return NULL;
+        }
+        return existing;
+    }
     
     // 新規変数作成
     variable_t* var = (variable_t*)malloc(sizeof(variable_t));
@@ -227,6 +240,35 @@ program_line_t* find_line(basic_state_t* state, uint16_t line_number) {
     return NULL;
 }
 
+// GOSUB/FORの実行制御スタックだけを破棄する。
+void basic_clear_control_stacks(basic_state_t* state) {
+    if (!state) return;
+    for_stack_entry_t* fe = state->for_stack;
+    while (fe) {
+        for_stack_entry_t* next = fe->next;
+        free(fe);
+        fe = next;
+    }
+    state->for_stack = NULL;
+    gosub_stack_entry_t* ge = state->gosub_stack;
+    while (ge) {
+        gosub_stack_entry_t* next = ge->next;
+        free(ge);
+        ge = next;
+    }
+    state->gosub_stack = NULL;
+}
+
+// 行の編集後はプログラム上の保存済み実行位置を破棄する。
+// 変数やDATAには触れず、既存の直接モードの内容を維持する。
+static void invalidate_program_edit(basic_state_t* state) {
+    state->can_continue = false;
+    state->current_line = NULL;
+    state->current_position = 0;
+    state->jump_pending = false;
+    basic_clear_control_stacks(state);
+}
+
 // プログラム行追加/更新
 int add_program_line(basic_state_t* state, uint16_t line_number, const char* text) {
     if (!state || !text) return -1;
@@ -242,6 +284,7 @@ int add_program_line(basic_state_t* state, uint16_t line_number, const char* tex
         
         while (line) {
             if (line->line_number == line_number) {
+                invalidate_program_edit(state);
                 if (prev) {
                     prev->next = line->next;
                 } else {
@@ -285,6 +328,7 @@ int add_program_line(basic_state_t* state, uint16_t line_number, const char* tex
         return -1;
     }
     strcpy(new_line->text, text);
+    invalidate_program_edit(state);
     
     // 適切な位置に挿入（行番号順）
     program_line_t* prev = NULL;
@@ -350,6 +394,7 @@ void basic_new_program(basic_state_t* state) {
     state->current_line = NULL;
     state->current_position = 0;
     state->running = false;
+    state->can_continue = false;
     
     clear_error(state);
 }

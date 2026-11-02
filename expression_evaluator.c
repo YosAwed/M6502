@@ -131,7 +131,8 @@ eval_result_t evaluate_expression_with_precedence(basic_state_t* state, parser_s
 
         if (op_token.type == TOKEN_OPERATOR) {
             const char* txt = parser_ptr->text;
-            uint16_t pos0 = save_pos;
+            // 空白を読み飛ばした後の、演算子トークンの実際の位置を使う。
+            uint16_t pos0 = op_token.position;
             char c1 = (pos0 < parser_ptr->length) ? txt[pos0] : '\0';
             char c2 = (pos0 + 1 < parser_ptr->length) ? txt[pos0 + 1] : '\0';
             if (c1 == '<' && c2 == '=') { is_combined = true; comb = OP_LE; op_prec = 100; }
@@ -228,6 +229,11 @@ eval_result_t evaluate_primary(basic_state_t* state, parser_state_t* parser_ptr)
     eval_result_t result = {0};
     
     token_t token = get_next_token(state, parser_ptr);
+    if (has_error(state)) {
+        if (token.type == TOKEN_STRING || token.type == TOKEN_VARIABLE)
+            free(token.value.string);
+        return result;
+    }
     
     switch (token.type) {
         case TOKEN_NUMBER:
@@ -319,7 +325,12 @@ eval_result_t evaluate_variable(basic_state_t* state, parser_state_t* parser_ptr
                 return result;
             }
             
-            indices[index_count++] = (uint16_t)numeric_to_double(index_result.value.num);
+            double index = numeric_to_double(index_result.value.num);
+            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX) {
+                set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
+                return result;
+            }
+            indices[index_count++] = (uint16_t)index;
             
             token_t sep_token = get_next_token(state, parser_ptr);
             if (sep_token.type == TOKEN_DELIMITER && sep_token.value.operator == ',') {

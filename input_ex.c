@@ -64,6 +64,8 @@ int cmd_input_ex(basic_state_t* state, parser_state_t* parser_ptr) {
             if (prompt_text) { free(prompt_text); prompt_text = NULL; }
         }
     } else {
+        // INPUTの先読みで確保した変数名は、巻き戻す前に解放する。
+        if (tok.type == TOKEN_VARIABLE) free(tok.value.string);
         parser_ptr->position = save_pos;
         parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
     }
@@ -95,7 +97,13 @@ int cmd_input_ex(basic_state_t* state, parser_state_t* parser_ptr) {
             bool is_str = strchr(v.value.string, '$') != NULL;
             variable_type_t vt = is_str ? VAR_STRING : VAR_NUMERIC;
             variable_t* var = create_variable(state, v.value.string, vt);
-            if (!var) { ok=false; free(field); free(v.value.string); break; }
+            if (!var) {
+                // 型不一致・メモリ不足は入力のやり直しでは回復しない。
+                free(field);
+                free(v.value.string);
+                free(prompt_text);
+                return -1;
+            }
             if (is_str) {
                 if (var->value.str.data) free(var->value.str.data);
                 var->value.str.data = field;
