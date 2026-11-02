@@ -4,6 +4,14 @@
 
 このリポジトリは、1976-1978年にMicrosoftが開発したBASIC M6502 Version 1.1の機能セットを現代のC言語で実装したものです。元の6502アセンブラコード（約7000行）を解析し、すべての命令と関数を再現しています。
 
+## ライセンス
+
+本プロジェクトで作成したC実装は、MITライセンスで公開しています。著作権表示は `Copyright (c) 2025 Yoshiharu Dewa` です。許諾条件の全文は `LICENSE` に収録しています。
+
+[Microsoft BASIC for 6502](https://github.com/microsoft/BASIC-M6502) を実装の参考にしました。[過去のコミットの `m6502.asm`](https://github.com/YosAwed/M6502/blob/0ae7242271a44d99b31518459082ebe9220f228f/m6502.asm) には、[原典の994〜1150行](https://github.com/microsoft/BASIC-M6502/blob/main/m6502.asm#L994-L1150) の抜粋が含まれます。Microsoft由来の部分には同社のMITライセンスが適用されます。著作権表示と許諾条件の原文は `LICENSES/Microsoft-BASIC-M6502.LICENSE` に収録しています。
+
+両ライセンス文書はWindows配布ZIPにも同梱しています。
+
 ## 実装済み機能一覧
 
 ### 1. 基本コマンド
