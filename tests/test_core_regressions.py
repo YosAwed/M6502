@@ -103,6 +103,16 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertIn("RETURNED\n", output)
         self.assertNotIn("WRONG\n", output)
 
+    def test_array_type_mismatch_releases_temporary_string(self):
+        output = self.run_basic('DIM A(2)\nA(0)="HELLO"\nPRINT 7')
+        self.assertIn("TYPE MISMATCH", output)
+        self.assertIn("7\n", output)
+
+    def test_array_out_of_range_releases_temporary_string(self):
+        output = self.run_basic('DIM A$(2)\nA$(3)="HELLO"\nPRINT 7')
+        self.assertIn("SUBSCRIPT OUT OF RANGE", output)
+        self.assertIn("7\n", output)
+
     def test_numeric_array_rejects_scalar_assignment(self):
         output = self.run_basic("DIM A(2)\nA=1\nPRINT 7\nCLEAR")
         self.assertIn("TYPE MISMATCH", output)

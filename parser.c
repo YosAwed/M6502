@@ -615,6 +615,9 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
         eval_result_t value = evaluate_expression(state, parser);
         if (has_error(state)) { free(var_token.value.string); return -1; }
         int rc = assign_array_element(state, var_token.value.string, indices, index_count, value);
+        // 成功した文字列代入のみ配列へ所有権が移る。
+        if (rc != 0 && value.type == 1)
+            free(value.value.str.data);
         free(var_token.value.string);
         return rc;
     }
