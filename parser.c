@@ -32,7 +32,7 @@ static const keyword_t keywords[] = {
     {"COS", 0xB8}, {"SIN", 0xB9}, {"TAN", 0xBA}, {"ATN", 0xBB},
     {"PEEK", 0xBC}, {"LEN", 0xBD}, {"STR$", 0xBE}, {"VAL", 0xBF},
     {"ASC", 0xC0}, {"CHR$", 0xC1}, {"LEFT$", 0xC2}, {"RIGHT$", 0xC3},
-    {"MID$", 0xC4}, {NULL, 0}
+    {"MID$", 0xC4}, {"FILES", 0xC5}, {NULL, 0}
 };
 
 // パーサー状態
@@ -313,7 +313,12 @@ int parse_line(basic_state_t* state, const char* line) {
     if (isdigit(parser.current_char)) {
         numeric_value_t line_num;
         if (parse_number(&parser, &line_num)) {
-            uint16_t line_number = (uint16_t)numeric_to_double(line_num);
+            double value = numeric_to_double(line_num);
+            if (!isfinite(value) || value < 0 || value > UINT16_MAX || floor(value) != value) {
+                set_error(state, ERR_ILLEGAL_QUANTITY, "Invalid line number");
+                return -1;
+            }
+            uint16_t line_number = (uint16_t)value;
             
             skip_whitespace(&parser);
             
@@ -327,6 +332,7 @@ int parse_line(basic_state_t* state, const char* line) {
     
     // 即座実行モード
     state->immediate_mode = true;
+    state->current_position = 0;
     return basic_execute_line(state, line);
 }
 
@@ -383,6 +389,9 @@ int basic_execute_line(basic_state_t* state, const char* line) {
                 case 0x91: rc = cmd_null(state, &parser); break;           // NULL
                 case 0x95: rc = cmd_def(state, &parser); break;            // DEF
                 case 0x98: rc = cmd_cont(state, &parser); break;           // CONT
+                case 0x93: rc = cmd_load(state, &parser); break;           // LOAD
+                case 0x94: rc = cmd_save(state, &parser); break;           // SAVE
+                case 0xC5: rc = cmd_files(state, &parser); break;          // FILES
                 case 0x9D: set_error(state, ERR_UNDEF_STATEMENT, "TAB not supported as statement"); rc = -1; break;
                 case 0x9E: case 0xA3: case 0xA1:
                     set_error(state, ERR_SYNTAX, "Misplaced keyword"); rc = -1; break;
@@ -425,25 +434,23 @@ int basic_execute_line(basic_state_t* state, const char* line) {
     return 0;
 }
 
+// C99-compatible helpers shared by PRINT's formatting cases.
+static void put_text_and_track(basic_state_t* state, const char* s) {
+    if (!s) return;
+    fputs(s, stdout);
+    state->trmpos = (uint8_t)((state->trmpos + (unsigned)strlen(s)) % 255);
+}
+
+static void put_spaces_and_track(basic_state_t* state, int n) {
+    if (n <= 0) return;
+    for (int i = 0; i < n; i++) putchar(' ');
+    state->trmpos = (uint8_t)((state->trmpos + (unsigned)n) % 255);
+}
+
 int cmd_print(basic_state_t* state, parser_state_t* parser) {
     bool trailing_semicolon = false;
-    bool first = true;
     const int zone = 14; // Microsoft BASIC print zone width
 
-    // local helper to output and track terminal column
-    auto void put_text_and_track(const char* s) {
-        if (!s) return;
-        fputs(s, stdout);
-        // update column position (naively count bytes)
-        size_t n = strlen(s);
-        // wrap handling is omitted for simplicity; track modulo line width
-        state->trmpos = (uint8_t)((state->trmpos + (unsigned)n) % 255);
-    };
-    auto void put_spaces_and_track(int n) {
-        if (n <= 0) return;
-        for (int i = 0; i < n; i++) putchar(' ');
-        state->trmpos = (uint8_t)((state->trmpos + (unsigned)n) % 255);
-    };
     while (1) {
         // Allow bare EOL
         uint16_t pos0 = parser->position;
@@ -456,13 +463,12 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             if (peek.value.operator == ',') {
                 int spaces = zone - (state->trmpos % zone);
                 if (spaces == 0) spaces = zone; // advance to next zone
-                put_spaces_and_track(spaces);
+                put_spaces_and_track(state, spaces);
             } else {
                 // Semicolon: separate fields tightly; add a single space for readability like classic BASIC
-                put_spaces_and_track(1);
+                put_spaces_and_track(state, 1);
                 trailing_semicolon = true;
             }
-            first = false;
             continue;
         }
         // TAB(n)
@@ -477,8 +483,8 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             if (target < 0) target = 0;
             if (target > 255) target = 255;
             int spaces = target - state->trmpos;
-            if (spaces > 0) put_spaces_and_track(spaces);
-            first = false; trailing_semicolon = false; continue;
+            if (spaces > 0) put_spaces_and_track(state, spaces);
+            trailing_semicolon = false; continue;
         }
         // SPC(n)
         if (peek.type == TOKEN_KEYWORD && peek.value.keyword_id == 0xA0) {
@@ -490,8 +496,8 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             if (close.type != TOKEN_DELIMITER || close.value.operator != ')') { set_error(state, ERR_SYNTAX, ") expected after SPC"); return -1; }
             int count = (int)numeric_to_double(n.value.num);
             if (count < 0) count = 0;
-            put_spaces_and_track(count);
-            first = false; trailing_semicolon = false; continue;
+            put_spaces_and_track(state, count);
+            trailing_semicolon = false; continue;
         }
         // Not a simple separator: rewind and evaluate expression
         parser->position = pos0;
@@ -499,15 +505,15 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
         eval_result_t val = evaluate_expression(state, parser);
         if (has_error(state)) return -1;
         if (val.type == 1) {
-            put_text_and_track(val.value.str.data ? val.value.str.data : "");
+            put_text_and_track(state, val.value.str.data ? val.value.str.data : "");
             if (val.value.str.data) free(val.value.str.data);
         } else {
             char buf[64];
             // emulate BASIC formatting loosely with %g
             snprintf(buf, sizeof(buf), "%g", numeric_to_double(val.value.num));
-            put_text_and_track(buf);
+            put_text_and_track(state, buf);
         }
-        first = false; trailing_semicolon = false;
+        trailing_semicolon = false;
         // Check for separator
         uint16_t save = parser->position;
         token_t sep = get_next_token(state, parser);
@@ -515,11 +521,11 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             if (sep.value.operator == ',') {
                 int spaces = zone - (state->trmpos % zone);
                 if (spaces == 0) spaces = zone;
-                put_spaces_and_track(spaces);
+                put_spaces_and_track(state, spaces);
                 trailing_semicolon = false;
             } else {
                 // Semicolon: add one space between items
-                put_spaces_and_track(1);
+                put_spaces_and_track(state, 1);
                 trailing_semicolon = true;
             }
             continue;
@@ -608,7 +614,10 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
 int basic_run_program(basic_state_t* state) {
     if (!state) return -1;
     
+    bool previous_mode = state->immediate_mode;
+    state->immediate_mode = false;
     state->current_line = state->program_start;
+    state->current_position = 0;
     state->running = true;
     
     while (state->current_line && state->running && !has_error(state)) {
@@ -623,6 +632,7 @@ int basic_run_program(basic_state_t* state) {
     }
     
     state->running = false;
+    state->immediate_mode = previous_mode;
     return has_error(state) ? -1 : 0;
 }
 

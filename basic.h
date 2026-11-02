@@ -15,6 +15,7 @@
 
 // 設定定数
 #define MAX_LINE_LENGTH 72
+#define MAX_INPUT_LENGTH 4096
 #define MAX_VARIABLES 256
 #define MAX_PROGRAM_LINES 1000
 #define MAX_STRING_LENGTH 255
@@ -38,7 +39,8 @@ typedef enum {
     ERR_SUBSCRIPT_OUT_OF_RANGE = 12,
     ERR_REDIMENSIONED_ARRAY = 13,
     ERR_RETURN_WITHOUT_GOSUB = 14,
-    ERR_NEXT_WITHOUT_FOR = 15
+    ERR_NEXT_WITHOUT_FOR = 15,
+    ERR_FILE_IO = 16
 } error_code_t;
 
 // 変数型定義
@@ -194,6 +196,7 @@ typedef struct {
 int basic_init(basic_state_t* state);
 void basic_cleanup(basic_state_t* state);
 int basic_load_program(basic_state_t* state, const char* filename);
+int basic_save_program(basic_state_t* state, const char* filename);
 int basic_run_program(basic_state_t* state);
 int basic_execute_line(basic_state_t* state, const char* line);
 void basic_list_program(basic_state_t* state);
@@ -218,6 +221,9 @@ double numeric_to_double(numeric_value_t n);
 int cmd_print(basic_state_t* state, parser_state_t* parser);
 int cmd_let(basic_state_t* state, parser_state_t* parser);
 int cmd_list(basic_state_t* state, parser_state_t* parser);
+int cmd_load(basic_state_t* state, parser_state_t* parser);
+int cmd_save(basic_state_t* state, parser_state_t* parser);
+int cmd_files(basic_state_t* state, parser_state_t* parser);
 int cmd_run(basic_state_t* state, parser_state_t* parser);
 int cmd_new(basic_state_t* state, parser_state_t* parser);
 int cmd_for(basic_state_t* state, parser_state_t* parser);
@@ -246,6 +252,7 @@ int cmd_cont(basic_state_t* state, parser_state_t* parser);
 int cmd_rem(basic_state_t* state, parser_state_t* parser);
 
 // パーサー関数
+int parse_line(basic_state_t* state, const char* line);
 token_t get_next_token(basic_state_t* state, parser_state_t* parser);
 eval_result_t evaluate_expression(basic_state_t* state, parser_state_t* parser);
 eval_result_t evaluate_variable(basic_state_t* state, parser_state_t* parser, const char* var_name);
@@ -256,6 +263,7 @@ eval_result_t perform_operation(basic_state_t* state, eval_result_t left, char o
 variable_t* find_variable(basic_state_t* state, const char* name);
 variable_t* create_variable(basic_state_t* state, const char* name, variable_type_t type);
 program_line_t* find_line(basic_state_t* state, uint16_t line_number);
+int add_program_line(basic_state_t* state, uint16_t line_number, const char* text);
 eval_result_t access_array_element(basic_state_t* state, const char* var_name, uint16_t* indices, uint8_t index_count);
 int assign_array_element(basic_state_t* state, const char* var_name, uint16_t* indices, uint8_t index_count, eval_result_t value);
 

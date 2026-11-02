@@ -110,6 +110,9 @@ int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
             case 0x91: rc = cmd_null(state, parser_ptr); break;           // NULL
             case 0x95: rc = cmd_def(state, parser_ptr); break;            // DEF
             case 0x98: rc = cmd_cont(state, parser_ptr); break;           // CONT
+            case 0x93: rc = cmd_load(state, parser_ptr); break;           // LOAD
+            case 0x94: rc = cmd_save(state, parser_ptr); break;           // SAVE
+            case 0xC5: rc = cmd_files(state, parser_ptr); break;          // FILES
             case 0x99: basic_list_program(state); rc = 0; break;          // LIST
             case 0x9C: basic_new_program(state); rc = 0; break;           // NEW
             case 0x9D: set_error(state, ERR_UNDEF_STATEMENT, "TAB not supported as statement"); rc = -1; break;

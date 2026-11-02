@@ -115,6 +115,9 @@ void set_error(basic_state_t* state, error_code_t code, const char* msg) {
             case ERR_NEXT_WITHOUT_FOR:
                 strcpy(state->error_msg, "NEXT WITHOUT FOR ERROR");
                 break;
+            case ERR_FILE_IO:
+                strcpy(state->error_msg, "FILE I/O ERROR");
+                break;
             default:
                 strcpy(state->error_msg, "UNKNOWN ERROR");
                 break;
@@ -227,6 +230,10 @@ program_line_t* find_line(basic_state_t* state, uint16_t line_number) {
 // プログラム行追加/更新
 int add_program_line(basic_state_t* state, uint16_t line_number, const char* text) {
     if (!state || !text) return -1;
+    if (strlen(text) > MAX_LINE_LENGTH) {
+        set_error(state, ERR_SYNTAX, "Program line too long");
+        return -1;
+    }
     
     // 既存行の削除（行番号のみの場合）
     if (strlen(text) == 0) {
@@ -250,6 +257,18 @@ int add_program_line(basic_state_t* state, uint16_t line_number, const char* tex
         return 0; // 行が見つからなくてもエラーではない
     }
     
+    // 上限時も既存行の更新と削除は許可する。
+    size_t line_count = 0;
+    bool replacing = false;
+    for (program_line_t* line = state->program_start; line; line = line->next) {
+        line_count++;
+        if (line->line_number == line_number) replacing = true;
+    }
+    if (!replacing && line_count >= MAX_PROGRAM_LINES) {
+        set_error(state, ERR_OUT_OF_MEMORY, "Too many program lines");
+        return -1;
+    }
+
     // 新規行作成
     program_line_t* new_line = (program_line_t*)malloc(sizeof(program_line_t));
     if (!new_line) {
@@ -324,20 +343,8 @@ void basic_new_program(basic_state_t* state) {
     }
     state->program_start = NULL;
     
-    // 変数の解放
-    variable_t* var = state->variables;
-    while (var) {
-        variable_t* next = var->next;
-        if (var->type == VAR_STRING && var->value.str.data) {
-            free(var->value.str.data);
-        } else if (var->type == VAR_ARRAY_NUMERIC || var->type == VAR_ARRAY_STRING) {
-            if (var->value.array.data) free(var->value.array.data);
-            if (var->value.array.dimensions) free(var->value.array.dimensions);
-        }
-        free(var);
-        var = next;
-    }
-    state->variables = NULL;
+    // 変数だけでなく、旧プログラムを参照するスタックとDATAも破棄する。
+    cmd_clear(state, NULL);
     
     // 実行状態リセット
     state->current_line = NULL;

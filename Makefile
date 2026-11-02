@@ -1,5 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_POSIX_C_SOURCE=199309L
+PYTHON ?= python3
+CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_POSIX_C_SOURCE=200809L
 INCLUDES = -I.
 LIBS = -lm
 
@@ -16,7 +17,7 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -o $@ $(LIBS)
 
-$(OBJDIR)/%.o: %.c | $(OBJDIR)
+$(OBJDIR)/%.o: %.c basic.h | $(OBJDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJDIR):
@@ -31,6 +32,7 @@ test: $(TARGET)
 	@echo '10 PRINT "Line 10"' | ./$(TARGET)
 	@echo '20 PRINT "Line 20"' | ./$(TARGET)
 	@echo 'LIST' | ./$(TARGET)
+	$(PYTHON) tests/test_file_commands.py ./$(TARGET)
 
 install: $(TARGET)
 	cp $(TARGET) /usr/local/bin/

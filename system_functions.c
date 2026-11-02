@@ -1,6 +1,9 @@
 #include "basic.h"
 #include <time.h>
 #include <ctype.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // 外部関数の宣言
 extern numeric_value_t double_to_numeric(double d);
@@ -329,8 +332,12 @@ int cmd_wait(basic_state_t* state, parser_state_t* parser_ptr) {
     }
     
     // 簡易実装：短時間待機
+#ifdef _WIN32
+    Sleep(10);
+#else
     struct timespec ts = {0, 10000000}; // 10ms
     nanosleep(&ts, NULL);
+#endif
     
     return 0;
 }
