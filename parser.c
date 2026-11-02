@@ -223,7 +223,9 @@ token_t get_next_token(basic_state_t* state, parser_state_t* parser) {
     if (parser->current_char == '"') {
         token.type = TOKEN_STRING;
         if (!parse_string(parser, &token.value.string)) {
+            // NULLの文字列ポインタを式評価へ渡さない。
             set_error(state, ERR_SYNTAX, "Unterminated string");
+            token.type = TOKEN_EOF;
         }
         return token;
     }
@@ -407,12 +409,14 @@ int basic_execute_line(basic_state_t* state, const char* line) {
             // LET 省略対応: 変数で始まる行は代入文として扱う
             // トークン開始位置に巻き戻して LET パーサに委譲
             uint16_t rewind_pos = token.position;
+            free(token.value.string);
             parser.position = rewind_pos;
             parser.current_char = (parser.position < parser.length) ? parser.text[parser.position] : '\0';
             rc = cmd_let(state, &parser);
         } else if (token.type == TOKEN_EOF || token.type == TOKEN_EOL) {
             break;
         } else {
+            if (token.type == TOKEN_STRING) free(token.value.string);
             set_error(state, ERR_SYNTAX, "Invalid statement");
             rc = -1;
         }
@@ -425,6 +429,9 @@ int basic_execute_line(basic_state_t* state, const char* line) {
         if (sep.type == TOKEN_DELIMITER && sep.value.operator == ':') {
             continue; // next statement on the same line
         }
+        // 区切りでなかったトークンの所有メモリを解放する。
+        if (sep.type == TOKEN_STRING || sep.type == TOKEN_VARIABLE)
+            free(sep.value.string);
         // put back non-separator token
         parser.position = save_pos;
         parser.current_char = (parser.position < parser.length) ? parser.text[parser.position] : '\0';
@@ -499,6 +506,14 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             put_spaces_and_track(state, count);
             trailing_semicolon = false; continue;
         }
+        // 先読みで確保した文字列は、巻き戻す前に解放する。
+        if (has_error(state)) {
+            if (peek.type == TOKEN_STRING || peek.type == TOKEN_VARIABLE)
+                free(peek.value.string);
+            return -1;
+        }
+        if (peek.type == TOKEN_STRING || peek.type == TOKEN_VARIABLE)
+            free(peek.value.string);
         // Not a simple separator: rewind and evaluate expression
         parser->position = pos0;
         parser->current_char = (parser->position < parser->length) ? parser->text[parser->position] : '\0';
@@ -530,6 +545,8 @@ int cmd_print(basic_state_t* state, parser_state_t* parser) {
             }
             continue;
         }
+        if (sep.type == TOKEN_STRING || sep.type == TOKEN_VARIABLE)
+            free(sep.value.string);
         parser->position = save;
         parser->current_char = (parser->position < parser->length) ? parser->text[parser->position] : '\0';
         break;

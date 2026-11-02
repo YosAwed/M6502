@@ -65,6 +65,8 @@ int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
         while (1) {
             uint16_t save = parser_ptr->position;
             token_t t = get_next_token(state, parser_ptr);
+            if (t.type == TOKEN_STRING || t.type == TOKEN_VARIABLE)
+                free(t.value.string);
             if (t.type == TOKEN_EOF || t.type == TOKEN_EOL) break;
             if (t.type == TOKEN_DELIMITER && t.value.operator == ':') {
                 // leave ':' for outer loop to consume
@@ -121,6 +123,8 @@ int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
                 rc = -1;
         }
     } else if (t.type == TOKEN_VARIABLE) {
+        // LETの解析に巻き戻す前に先読み分を解放する。
+        free(t.value.string);
         // LET omitted
         parser_ptr->position = stmt_start;
         parser_ptr->current_char = (parser_ptr->position < parser_ptr->length) ? parser_ptr->text[parser_ptr->position] : '\0';
@@ -128,6 +132,7 @@ int cmd_if(basic_state_t* state, parser_state_t* parser_ptr) {
     } else if (t.type == TOKEN_EOF || t.type == TOKEN_EOL) {
         rc = 0;
     } else {
+        if (t.type == TOKEN_STRING) free(t.value.string);
         set_error(state, ERR_SYNTAX, "Invalid statement after THEN");
         rc = -1;
     }

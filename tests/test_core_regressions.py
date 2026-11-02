@@ -45,6 +45,16 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertIn("Invalid array dimension", output)
         self.assertIn("7\n", output)
 
+    def test_unterminated_string_reports_error(self):
+        output = self.run_basic('PRINT "unterminated\nPRINT 7')
+        self.assertIn("Unterminated string", output)
+        self.assertIn("7\n", output)
+
+    def test_unterminated_string_assignment_reports_error(self):
+        output = self.run_basic('A$="unterminated\nPRINT 7')
+        self.assertIn("Unterminated string", output)
+        self.assertIn("7\n", output)
+
 
 if __name__ == "__main__":
     unittest.main()

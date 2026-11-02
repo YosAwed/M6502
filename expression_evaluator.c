@@ -228,6 +228,11 @@ eval_result_t evaluate_primary(basic_state_t* state, parser_state_t* parser_ptr)
     eval_result_t result = {0};
     
     token_t token = get_next_token(state, parser_ptr);
+    if (has_error(state)) {
+        if (token.type == TOKEN_STRING || token.type == TOKEN_VARIABLE)
+            free(token.value.string);
+        return result;
+    }
     
     switch (token.type) {
         case TOKEN_NUMBER:
