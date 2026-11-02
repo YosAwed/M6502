@@ -101,6 +101,19 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertIn("RETURNED\n", output)
         self.assertNotIn("WRONG\n", output)
 
+    def test_numeric_value_to_string_variable_is_type_mismatch(self):
+        for value in ("1", "1.5", "-1"):
+            with self.subTest(value=value, mode="new"):
+                output = self.run_basic(f"A$={value}\nPRINT 7")
+                self.assertIn("TYPE MISMATCH", output)
+                self.assertIn("7\n", output)
+            with self.subTest(value=value, mode="existing"):
+                output = self.run_basic(
+                    f'A$="OK"\nA$={value}\nPRINT A$'
+                )
+                self.assertIn("TYPE MISMATCH", output)
+                self.assertIn("OK\n", output)
+
     def test_run_after_stop_does_not_reuse_gosub_stack(self):
         output = self.run_basic(
             '10 A=A+1\n20 IF A=1 THEN GOSUB 100\n'

@@ -639,7 +639,12 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
     if (!var) { if (value.type==1 && value.value.str.data) free(value.value.str.data); free(var_token.value.string); return -1; }
     
     if (is_string) {
-        if (value.type != 1) { set_error(state, ERR_TYPE_MISMATCH, NULL); if (value.value.str.data) free(value.value.str.data); free(var_token.value.string); return -1; }
+        if (value.type != 1) {
+            // 数値結果を文字列ポインタとしてfreeしてはいけない。
+            set_error(state, ERR_TYPE_MISMATCH, NULL);
+            free(var_token.value.string);
+            return -1;
+        }
         if (var->value.str.data) free(var->value.str.data);
         var->value.str.data = value.value.str.data; // take ownership
         var->value.str.length = var->value.str.data ? (uint16_t)strlen(var->value.str.data) : 0;
