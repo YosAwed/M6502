@@ -12,6 +12,7 @@ extern variable_t* find_variable(basic_state_t* state, const char* name);
 extern variable_t* create_variable(basic_state_t* state, const char* name, variable_type_t type);
 extern token_t get_next_token(basic_state_t* state, parser_state_t* parser);
 extern eval_result_t evaluate_expression(basic_state_t* state, parser_state_t* parser);
+extern program_line_t* find_line(basic_state_t* state, uint16_t line_number);
 
 // 仮想メモリ（元の6502メモリをシミュレート）
 static uint8_t virtual_memory[65536];
@@ -206,6 +207,7 @@ int cmd_input(basic_state_t* state, parser_state_t* parser_ptr) {
 // CLEAR文の実装
 int cmd_clear(basic_state_t* state, parser_state_t* parser_ptr) {
     (void)parser_ptr; // 未使用パラメータ
+    state->can_continue = false;
     
     // 変数の解放
     variable_t* var = state->variables;
@@ -253,11 +255,14 @@ int cmd_clear(basic_state_t* state, parser_state_t* parser_ptr) {
 
 // STOP文の実装
 int cmd_stop(basic_state_t* state, parser_state_t* parser_ptr) {
-    (void)parser_ptr; // 未使用パラメータ
-    
+    // 直接モードでは再開位置を作らない。
+    state->can_continue = state->running && !state->immediate_mode && state->current_line;
+    if (state->can_continue) {
+        state->stopped_line_number = state->current_line->line_number;
+        state->stopped_position = parser_ptr->position;
+    }
     state->running = false;
     printf("BREAK IN %d\n", state->current_line ? state->current_line->line_number : 0);
-    
     return 0;
 }
 
@@ -266,20 +271,27 @@ int cmd_end(basic_state_t* state, parser_state_t* parser_ptr) {
     (void)parser_ptr; // 未使用パラメータ
     
     state->running = false;
+    state->can_continue = false;
     return 0;
 }
 
 // CONT文の実装
 int cmd_cont(basic_state_t* state, parser_state_t* parser_ptr) {
-    (void)parser_ptr; // 未使用パラメータ
-    
-    if (!state->current_line) {
+    (void)parser_ptr;
+    if (!state->immediate_mode || !state->can_continue) {
         set_error(state, ERR_CANT_CONTINUE, NULL);
         return -1;
     }
-    
-    state->running = true;
-    return 0;
+    program_line_t* line = find_line(state, state->stopped_line_number);
+    if (!line) {
+        state->can_continue = false;
+        set_error(state, ERR_CANT_CONTINUE, NULL);
+        return -1;
+    }
+    state->can_continue = false;
+    state->current_line = line;
+    state->current_position = state->stopped_position;
+    return basic_continue_program(state);
 }
 
 // REM文の実装

@@ -25,6 +25,58 @@ class CoreRegressionsTest(unittest.TestCase):
         )
         return result.stdout.replace("] ", "")
 
+    def test_delete_stopped_line_invalidates_continuation(self):
+        output = self.run_basic(
+            '10 STOP\n20 END\nRUN\n10\nCONT\nPRINT 7'
+        )
+        self.assertIn("CAN'T CONTINUE", output)
+        self.assertIn("7\n", output)
+
+    def test_replace_stopped_line_invalidates_continuation(self):
+        output = self.run_basic(
+            '10 STOP\n20 END\nRUN\n10 PRINT 99\nCONT\nPRINT 7'
+        )
+        self.assertIn("CAN'T CONTINUE", output)
+        self.assertIn("7\n", output)
+
+    def test_delete_gosub_return_line_during_stop(self):
+        output = self.run_basic(
+            '10 GOSUB 100\n20 PRINT "AFTER":END\n'
+            '100 STOP\n110 RETURN\nRUN\n10\nCONT\nPRINT 7'
+        )
+        self.assertIn("CAN'T CONTINUE", output)
+        self.assertIn("7\n", output)
+        self.assertNotIn("AFTER\n", output)
+
+    def test_stop_cont_resumes_on_next_line(self):
+        output = self.run_basic(
+            '10 PRINT "BEFORE"\n20 STOP\n30 PRINT "AFTER"\nRUN\nCONT'
+        )
+        self.assertIn("BEFORE\n", output)
+        self.assertIn("BREAK IN 20", output)
+        self.assertIn("AFTER\n", output)
+        self.assertNotIn("?", output)
+
+    def test_stop_cont_resumes_within_same_line(self):
+        output = self.run_basic(
+            '10 PRINT "BEFORE":STOP:PRINT "AFTER":END\nRUN\nCONT'
+        )
+        self.assertIn("BREAK IN 10", output)
+        self.assertEqual(output.count("AFTER\n"), 1, output)
+
+    def test_cont_without_stop_is_rejected(self):
+        output = self.run_basic("CONT")
+        self.assertIn("CAN'T CONTINUE", output)
+
+    def test_end_invalidates_stop_continuation(self):
+        output = self.run_basic("10 STOP\n20 END\nRUN\nCONT\nCONT")
+        self.assertIn("CAN'T CONTINUE", output)
+
+    def test_program_edit_invalidates_stop_continuation(self):
+        output = self.run_basic("10 STOP\n20 PRINT 7\nRUN\n20 PRINT 8\nCONT")
+        self.assertIn("CAN'T CONTINUE", output)
+        self.assertNotIn("8\n", output)
+
     def test_goto_skips_remainder_of_source_line(self):
         output = self.run_basic(
             '10 GOTO 30:PRINT "WRONG"\n'

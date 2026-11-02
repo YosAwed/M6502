@@ -120,6 +120,9 @@ typedef struct {
     bool running;                   // 実行中フラグ
     bool immediate_mode;            // 即座実行モード
     bool jump_pending;              // 制御移動による行の実行中断
+    bool can_continue;              // STOPで保存した再開位置の有効性
+    uint16_t stopped_line_number;  // STOP時の行番号
+    uint16_t stopped_position;     // STOPの直後の行内位置
     
     // 制御フラグ
     uint8_t valtyp;         // 値型 (0=数値, 1=文字列)
@@ -199,9 +202,11 @@ void basic_cleanup(basic_state_t* state);
 int basic_load_program(basic_state_t* state, const char* filename);
 int basic_save_program(basic_state_t* state, const char* filename);
 int basic_run_program(basic_state_t* state);
+int basic_continue_program(basic_state_t* state);
 int basic_execute_line(basic_state_t* state, const char* line);
 void basic_list_program(basic_state_t* state);
 void basic_new_program(basic_state_t* state);
+void basic_clear_control_stacks(basic_state_t* state);
 
 // エラー処理
 void set_error(basic_state_t* state, error_code_t code, const char* msg);

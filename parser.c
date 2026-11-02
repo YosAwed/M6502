@@ -435,6 +435,8 @@ int basic_execute_line(basic_state_t* state, const char* line) {
         }
 
         if (rc != 0 || has_error(state)) return rc;
+        // STOP/END の後に同じ行の後続文を実行しない。
+        if (!state->immediate_mode && !state->running) return 0;
         if (state->jump_pending) return 0;
 
         // After a statement, optionally consume ':' and continue; otherwise stop at EOL/EOF
@@ -648,36 +650,45 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
     return 0;
 }
 
-// プログラム実行
-int basic_run_program(basic_state_t* state) {
-    if (!state) return -1;
-    
+// RUNとCONTで共通の非再帰実行ループを利用する。
+static int execute_program_loop(basic_state_t* state) {
     bool previous_mode = state->immediate_mode;
     state->immediate_mode = false;
-    state->current_line = state->program_start;
-    state->current_position = 0;
     state->running = true;
-    state->jump_pending = false;
-    
+
     while (state->current_line && state->running && !has_error(state)) {
         program_line_t* before = state->current_line;
         int result = basic_execute_line(state, state->current_line->text);
         if (result != 0 || has_error(state) || !state->running) break;
+
         if (state->jump_pending) {
             state->jump_pending = false;
             continue;
         }
-        
-        // If resuming mid-line (state->current_position set), or current_line changed, don't auto-advance
-        if (state->current_line == before && state->current_position == 0) {
+        if (state->current_line == before && state->current_position == 0)
             state->current_line = state->current_line->next;
-        }
     }
-    
+
     state->running = false;
     state->immediate_mode = previous_mode;
+    if (has_error(state) || !state->current_line)
+        state->can_continue = false;
     return has_error(state) ? -1 : 0;
 }
 
+// 先頭からのRUNは停止位置を無効にする。
+int basic_run_program(basic_state_t* state) {
+    if (!state) return -1;
+    state->current_line = state->program_start;
+    state->current_position = 0;
+    state->jump_pending = false;
+    state->can_continue = false;
+    return execute_program_loop(state);
+}
 
-
+// STOPの保存位置からのCONT用。
+int basic_continue_program(basic_state_t* state) {
+    if (!state || !state->current_line) return -1;
+    state->jump_pending = false;
+    return execute_program_loop(state);
+}

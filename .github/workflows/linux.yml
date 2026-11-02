@@ -17,4 +17,5 @@ jobs:
       - name: Normal build and tests
         run: make test
       - name: ASan and UBSan build and tests
+        if: success() || failure()
         run: make test-asan
