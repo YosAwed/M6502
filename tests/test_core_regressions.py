@@ -25,6 +25,38 @@ class CoreRegressionsTest(unittest.TestCase):
         )
         return result.stdout.replace("] ", "")
 
+    def test_goto_skips_remainder_of_source_line(self):
+        output = self.run_basic(
+            '10 GOTO 30:PRINT "WRONG"\n'
+            '20 PRINT "SKIPPED"\n30 PRINT "OK"\nRUN'
+        )
+        self.assertIn("OK\n", output)
+        self.assertNotIn("WRONG\n", output)
+        self.assertNotIn("SKIPPED\n", output)
+
+    def test_goto_same_line_does_not_advance(self):
+        output = self.run_basic(
+            "10 A=A+1:IF A<3 THEN 10\n20 PRINT A\nRUN"
+        )
+        self.assertIn("3\n", output)
+
+    def test_gosub_return_skips_remainder_and_resumes(self):
+        output = self.run_basic(
+            '10 GOSUB 100:PRINT "RETURNED":END\n'
+            '100 PRINT "SUB":RETURN:PRINT "WRONG"\nRUN'
+        )
+        self.assertIn("SUB\n", output)
+        self.assertIn("RETURNED\n", output)
+        self.assertNotIn("WRONG\n", output)
+
+    def test_run_in_program_restarts_without_recursive_stack_growth(self):
+        output = self.run_basic(
+            '10 A=A+1\n20 IF A<3000 THEN 40\n30 PRINT A:END\n'
+            '40 RUN:PRINT "SHOULD NOT PRINT"\nRUN'
+        )
+        self.assertIn("3000\n", output)
+        self.assertNotIn("SHOULD NOT PRINT\n", output)
+
     def test_oversized_exponent_reports_error(self):
         output = self.run_basic("PRINT 1E999999999999\nPRINT 7")
         self.assertIn("Invalid number format", output)

@@ -26,6 +26,9 @@ int cmd_goto_line(basic_state_t* state, uint16_t line_number) {
     }
     state->current_line = target;
     state->current_position = 0;
+    // 同じ行へのGOTOも通常の次行移動と区別する。
+    if (state->running && !state->immediate_mode)
+        state->jump_pending = true;
     return 0;
 }
 
@@ -170,6 +173,8 @@ int cmd_return(basic_state_t* state, parser_state_t* parser_ptr) {
 
     state->current_line = entry->line;
     state->current_position = entry->position;
+    if (state->running && !state->immediate_mode)
+        state->jump_pending = true;
     free(entry);
     return 0;
 }
@@ -270,6 +275,8 @@ int cmd_next(basic_state_t* state, parser_state_t* parser_ptr) {
         // Jump back to after FOR statement
         state->current_line = cur->line;
         state->current_position = cur->position;
+        if (state->running && !state->immediate_mode)
+            state->jump_pending = true;
     } else {
         // Pop this frame
         if (prev) prev->next = cur->next; else state->for_stack = cur->next;

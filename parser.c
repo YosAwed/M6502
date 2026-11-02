@@ -403,7 +403,16 @@ int basic_execute_line(basic_state_t* state, const char* line) {
                     set_error(state, ERR_SYNTAX, "Misplaced keyword"); rc = -1; break;
                 case 0x99: basic_list_program(state); rc = 0; break;       // LIST
                 case 0x9C: basic_new_program(state); rc = 0; break;        // NEW
-                case 0x89: rc = basic_run_program(state); break;           // RUN
+                case 0x89: // RUN
+                    if (!state->immediate_mode && state->running) {
+                        // 実行中のRUNは再帰呼び出しせず、実行位置だけを戻す。
+                        state->current_line = state->program_start;
+                        state->current_position = 0;
+                        state->jump_pending = true;
+                    } else {
+                        rc = basic_run_program(state);
+                    }
+                    break;
                 case 0x8E: rc = cmd_rem(state, &parser); break;            // REM
                 default:
                     set_error(state, ERR_UNDEF_STATEMENT, "Command not implemented");
@@ -426,6 +435,7 @@ int basic_execute_line(basic_state_t* state, const char* line) {
         }
 
         if (rc != 0 || has_error(state)) return rc;
+        if (state->jump_pending) return 0;
 
         // After a statement, optionally consume ':' and continue; otherwise stop at EOL/EOF
         uint16_t save_pos = parser.position;
@@ -647,11 +657,16 @@ int basic_run_program(basic_state_t* state) {
     state->current_line = state->program_start;
     state->current_position = 0;
     state->running = true;
+    state->jump_pending = false;
     
     while (state->current_line && state->running && !has_error(state)) {
         program_line_t* before = state->current_line;
         int result = basic_execute_line(state, state->current_line->text);
         if (result != 0 || has_error(state) || !state->running) break;
+        if (state->jump_pending) {
+            state->jump_pending = false;
+            continue;
+        }
         
         // If resuming mid-line (state->current_position set), or current_line changed, don't auto-advance
         if (state->current_line == before && state->current_position == 0) {

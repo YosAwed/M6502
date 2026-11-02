@@ -119,6 +119,7 @@ typedef struct {
     uint16_t current_position;      // 行内の位置
     bool running;                   // 実行中フラグ
     bool immediate_mode;            // 即座実行モード
+    bool jump_pending;              // 制御移動による行の実行中断
     
     // 制御フラグ
     uint8_t valtyp;         // 値型 (0=数値, 1=文字列)
