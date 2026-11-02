@@ -1,5 +1,6 @@
 #include "basic.h"
 #include <ctype.h>
+#include <limits.h>
 
 // 外部関数の宣言
 numeric_value_t double_to_numeric(double d);
@@ -111,7 +112,10 @@ static bool parse_number(parser_state_t* parser, numeric_value_t* result) {
         
         int exponent = 0;
         while (isdigit(parser->current_char)) {
-            exponent = exponent * 10 + (parser->current_char - '0');
+            int digit = parser->current_char - '0';
+            // 符号付き整数のオーバーフローを防ぐ。
+            if (exponent > (INT_MAX - digit) / 10) return false;
+            exponent = exponent * 10 + digit;
             advance_parser(parser);
         }
         

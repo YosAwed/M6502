@@ -25,6 +25,16 @@ class CoreRegressionsTest(unittest.TestCase):
         )
         return result.stdout.replace("] ", "")
 
+    def test_oversized_exponent_reports_error(self):
+        output = self.run_basic("PRINT 1E999999999999\nPRINT 7")
+        self.assertIn("Invalid number format", output)
+        self.assertIn("7\n", output)
+
+    def test_normal_exponent_unchanged(self):
+        output = self.run_basic("PRINT 1E2")
+        self.assertNotIn("?", output)
+        self.assertIn("100\n", output)
+
     def test_array_size_overflow_is_rejected(self):
         output = self.run_basic("DIM A(300,300)\nPRINT 7")
         self.assertIn("Array too large", output)
