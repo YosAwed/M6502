@@ -196,7 +196,14 @@ variable_t* create_variable(basic_state_t* state, const char* name, variable_typ
     
     // 既存変数チェック
     variable_t* existing = find_variable(state, name);
-    if (existing) return existing;
+    if (existing) {
+        // 既存配列をスカラーとして上書きすると共用体のポインタが壊れる。
+        if (existing->type != type) {
+            set_error(state, ERR_TYPE_MISMATCH, NULL);
+            return NULL;
+        }
+        return existing;
+    }
     
     // 新規変数作成
     variable_t* var = (variable_t*)malloc(sizeof(variable_t));

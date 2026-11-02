@@ -101,6 +101,40 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertIn("RETURNED\n", output)
         self.assertNotIn("WRONG\n", output)
 
+    def test_numeric_array_rejects_scalar_assignment(self):
+        output = self.run_basic("DIM A(2)\nA=1\nPRINT 7\nCLEAR")
+        self.assertIn("TYPE MISMATCH", output)
+        self.assertIn("7\n", output)
+
+    def test_string_array_rejects_scalar_assignment(self):
+        output = self.run_basic(
+            'DIM A$(2)\nA$="HELLO"\nPRINT 7\nCLEAR'
+        )
+        self.assertIn("TYPE MISMATCH", output)
+        self.assertIn("7\n", output)
+
+    def test_read_and_for_reject_arrays_as_scalars(self):
+        cases = (
+            "DIM A(2)\nFOR A=1 TO 3\nPRINT 7\nCLEAR",
+            "DIM A$(2)\nDATA HELLO\nREAD A$\nPRINT 7\nCLEAR",
+        )
+        for commands in cases:
+            with self.subTest(commands=commands):
+                output = self.run_basic(commands)
+                self.assertIn("TYPE MISMATCH", output)
+                self.assertIn("7\n", output)
+
+    def test_input_and_get_reject_arrays_as_scalars(self):
+        cases = (
+            "DIM A$(2)\nINPUT A$\nHELLO\nPRINT 7\nCLEAR",
+            "DIM A$(2)\nGET A$\nQ\nPRINT 7\nCLEAR",
+        )
+        for commands in cases:
+            with self.subTest(commands=commands):
+                output = self.run_basic(commands)
+                self.assertIn("TYPE MISMATCH", output)
+                self.assertIn("7\n", output)
+
     def test_numeric_value_to_string_variable_is_type_mismatch(self):
         for value in ("1", "1.5", "-1"):
             with self.subTest(value=value, mode="new"):
