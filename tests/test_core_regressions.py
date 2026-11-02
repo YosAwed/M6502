@@ -101,6 +101,31 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertIn("RETURNED\n", output)
         self.assertNotIn("WRONG\n", output)
 
+    def test_run_after_stop_does_not_reuse_gosub_stack(self):
+        output = self.run_basic(
+            '10 A=A+1\n20 IF A=1 THEN GOSUB 100\n'
+            '30 PRINT "MARK":RETURN\n40 END\n100 STOP\nRUN\nRUN'
+        )
+        self.assertEqual(output.count("MARK\n"), 1, output)
+        self.assertIn("RETURN WITHOUT GOSUB", output)
+
+    def test_run_after_stop_does_not_reuse_for_stack(self):
+        output = self.run_basic(
+            '10 A=A+1\n20 IF A=1 THEN FOR I=1 TO 2\n'
+            '30 IF A=1 THEN STOP\n40 IF A=2 THEN NEXT I\n'
+            '50 PRINT "DONE":END\nRUN\nRUN'
+        )
+        self.assertIn("NEXT WITHOUT FOR", output)
+        self.assertNotIn("DONE\n", output)
+
+    def test_run_in_program_clears_gosub_stack(self):
+        output = self.run_basic(
+            '10 A=A+1\n20 IF A=1 THEN GOSUB 100\n'
+            '30 PRINT "MARK":RETURN\n100 RUN\nRUN'
+        )
+        self.assertEqual(output.count("MARK\n"), 1, output)
+        self.assertIn("RETURN WITHOUT GOSUB", output)
+
     def test_run_in_program_restarts_without_recursive_stack_growth(self):
         output = self.run_basic(
             '10 A=A+1\n20 IF A<3000 THEN 40\n30 PRINT A:END\n'

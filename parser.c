@@ -405,6 +405,8 @@ int basic_execute_line(basic_state_t* state, const char* line) {
                 case 0x9C: basic_new_program(state); rc = 0; break;        // NEW
                 case 0x89: // RUN
                     if (!state->immediate_mode && state->running) {
+                        // 新しいRUNに以前のGOSUB/FORフレームを持ち越さない。
+                        basic_clear_control_stacks(state);
                         // 実行中のRUNは再帰呼び出しせず、実行位置だけを戻す。
                         state->current_line = state->program_start;
                         state->current_position = 0;
@@ -683,6 +685,7 @@ int basic_run_program(basic_state_t* state) {
     state->current_position = 0;
     state->jump_pending = false;
     state->can_continue = false;
+    basic_clear_control_stacks(state);
     return execute_program_loop(state);
 }
 
