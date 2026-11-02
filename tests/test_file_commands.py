@@ -2,6 +2,7 @@
 """Exercise file commands through the real BASIC prompt, in isolated folders."""
 
 from pathlib import Path
+import os
 import subprocess
 import sys
 import tempfile
@@ -243,7 +244,9 @@ class FileCommandsTest(unittest.TestCase):
         (self.directory / "directory.bas").mkdir()
         output = self.run_basic("FILES")
         self.assert_success(output)
-        self.assertIn(str(self.directory.resolve()), output)
+        # Windows paths are case-insensitive, and the drive letter or folder
+        # case from TEMP can differ from the case Path.resolve() reports.
+        self.assertIn(os.path.normcase(str(self.directory.resolve())), os.path.normcase(output))
         self.assertLess(output.index("a.bas"), output.index("upper.BAS"))
         self.assertLess(output.index("upper.BAS"), output.index("z.bas"))
         self.assertNotIn("not-basic.txt", output)
