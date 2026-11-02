@@ -86,7 +86,7 @@ int cmd_dim(basic_state_t* state, parser_state_t* parser_ptr) {
             }
             double dimension = numeric_to_double(dim_result.value.num);
             if (!isfinite(dimension) || dimension < 0.0 ||
-                dimension >= UINT16_MAX || floor(dimension) != dimension) {
+                dimension >= UINT16_MAX) {
                 set_error(state, ERR_ILLEGAL_QUANTITY, "Invalid array dimension");
                 free(var_token.value.string);
                 return -1;

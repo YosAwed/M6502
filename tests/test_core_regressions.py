@@ -191,6 +191,20 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertNotIn("?", output)
         self.assertIn("100\n", output)
 
+    def test_fractional_array_dimensions_and_indices_use_old_truncation(self):
+        output = self.run_basic(
+            "DIM A(2.9,3.9)\nA(1.9,2.9)=42\nPRINT A(1,2)\n"
+            "A(2.9,3.9)=99\nPRINT A(2,3)"
+        )
+        self.assertNotIn("?", output)
+        self.assertIn("42\n", output)
+        self.assertIn("99\n", output)
+
+    def test_negative_fractional_array_dimension_is_rejected(self):
+        output = self.run_basic("DIM A(-0.5)\nPRINT 7")
+        self.assertIn("Invalid array dimension", output)
+        self.assertIn("7\n", output)
+
     def test_array_size_overflow_is_rejected(self):
         output = self.run_basic("DIM A(300,300)\nPRINT 7")
         self.assertIn("Array too large", output)

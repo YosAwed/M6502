@@ -593,8 +593,7 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
             eval_result_t idx = evaluate_expression(state, parser);
             if (has_error(state) || idx.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric index expected"); free(var_token.value.string); return -1; }
             double index = numeric_to_double(idx.value.num);
-            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX ||
-                floor(index) != index) {
+            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX) {
                 set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
                 free(var_token.value.string);
                 return -1;

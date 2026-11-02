@@ -326,8 +326,7 @@ eval_result_t evaluate_variable(basic_state_t* state, parser_state_t* parser_ptr
             }
             
             double index = numeric_to_double(index_result.value.num);
-            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX ||
-                floor(index) != index) {
+            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX) {
                 set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
                 return result;
             }
