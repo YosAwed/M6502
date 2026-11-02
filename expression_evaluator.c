@@ -319,7 +319,13 @@ eval_result_t evaluate_variable(basic_state_t* state, parser_state_t* parser_ptr
                 return result;
             }
             
-            indices[index_count++] = (uint16_t)numeric_to_double(index_result.value.num);
+            double index = numeric_to_double(index_result.value.num);
+            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX ||
+                floor(index) != index) {
+                set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
+                return result;
+            }
+            indices[index_count++] = (uint16_t)index;
             
             token_t sep_token = get_next_token(state, parser_ptr);
             if (sep_token.type == TOKEN_DELIMITER && sep_token.value.operator == ',') {

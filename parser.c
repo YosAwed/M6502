@@ -557,7 +557,14 @@ int cmd_let(basic_state_t* state, parser_state_t* parser) {
         while (index_count < MAX_ARRAY_DIMENSIONS) {
             eval_result_t idx = evaluate_expression(state, parser);
             if (has_error(state) || idx.type != 0) { set_error(state, ERR_TYPE_MISMATCH, "Numeric index expected"); free(var_token.value.string); return -1; }
-            indices[index_count++] = (uint16_t)numeric_to_double(idx.value.num);
+            double index = numeric_to_double(idx.value.num);
+            if (!isfinite(index) || index < 0.0 || index > UINT16_MAX ||
+                floor(index) != index) {
+                set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
+                free(var_token.value.string);
+                return -1;
+            }
+            indices[index_count++] = (uint16_t)index;
             token_t sep = get_next_token(state, parser);
             if (sep.type == TOKEN_DELIMITER && sep.value.operator == ',') {
                 continue;

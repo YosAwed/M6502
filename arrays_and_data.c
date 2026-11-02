@@ -21,57 +21,62 @@ typedef struct {
 
 static data_state_t g_data_state = {NULL, NULL};
 
-// 配列の次元計算
+// 配列要素数を16ビットで表せる場合のみ返す。0はサイズ超過を示す。
 uint16_t calculate_array_size(uint16_t* dimensions, uint8_t dim_count) {
-    uint16_t total = 1;
+    size_t total = 1;
     for (uint8_t i = 0; i < dim_count; i++) {
-        total *= (dimensions[i] + 1); // BASICは0ベースなので+1
+        size_t extent = (size_t)dimensions[i] + 1;
+        if (total > UINT16_MAX / extent) return 0;
+        total *= extent;
     }
-    return total;
+    return (uint16_t)total;
 }
 
-// 配列インデックスの計算
+// 配列の線形添字を計算する。UINT16_MAXは範囲外を示す。
 uint16_t calculate_array_index(uint16_t* dimensions, uint8_t dim_count, uint16_t* indices) {
-    uint16_t index = 0;
-    uint16_t multiplier = 1;
-    
-    for (int i = dim_count - 1; i >= 0; i--) {
-        if (indices[i] > dimensions[i]) {
-            return 0xFFFF; // エラー：範囲外
-        }
-        index += indices[i] * multiplier;
-        multiplier *= (dimensions[i] + 1);
+    size_t index = 0;
+    size_t multiplier = 1;
+    for (int i = (int)dim_count - 1; i >= 0; i--) {
+        if (indices[i] > dimensions[i]) return UINT16_MAX;
+        index += (size_t)indices[i] * multiplier;
+        multiplier *= (size_t)dimensions[i] + 1;
     }
-    
-    return index;
+    return index >= UINT16_MAX ? UINT16_MAX : (uint16_t)index;
+}
+
+// DIMで確保した一時データを登録前に解放する。
+static void free_array_storage(void* data, bool is_string, uint16_t count) {
+    if (!data) return;
+    if (is_string) {
+        char** values = (char**)data;
+        for (uint16_t i = 0; i < count; i++) free(values[i]);
+    }
+    free(data);
 }
 
 // DIM文の実装
 int cmd_dim(basic_state_t* state, parser_state_t* parser_ptr) {
-    // DIM var(dim1, dim2, ...), var2(dim1, dim2, ...), ...
-    
     while (true) {
-        // 変数名の取得
         token_t var_token = get_next_token(state, parser_ptr);
         if (var_token.type != TOKEN_VARIABLE) {
             set_error(state, ERR_SYNTAX, "Variable name expected in DIM");
             return -1;
         }
-        
-        // 既存変数チェック
-        // 既存変数チェック（同名が存在すればエラー）
-        variable_t* existing_var = find_variable(state, var_token.value.string); if (existing_var) { set_error(state, ERR_REDIMENSIONED_ARRAY, NULL); free(var_token.value.string); return -1; }
+        if (find_variable(state, var_token.value.string)) {
+            set_error(state, ERR_REDIMENSIONED_ARRAY, NULL);
+            free(var_token.value.string);
+            return -1;
+        }
         token_t open_paren = get_next_token(state, parser_ptr);
         if (open_paren.type != TOKEN_DELIMITER || open_paren.value.operator != '(') {
             set_error(state, ERR_SYNTAX, "( expected in DIM");
             free(var_token.value.string);
             return -1;
         }
-        
-        // 次元の読み取り
+
         uint16_t dimensions[MAX_ARRAY_DIMENSIONS];
         uint8_t dim_count = 0;
-        
+        bool closed = false;
         while (dim_count < MAX_ARRAY_DIMENSIONS) {
             eval_result_t dim_result = evaluate_expression(state, parser_ptr);
             if (has_error(state) || dim_result.type != 0) {
@@ -79,106 +84,100 @@ int cmd_dim(basic_state_t* state, parser_state_t* parser_ptr) {
                 free(var_token.value.string);
                 return -1;
             }
-            
-            int dim_val = (int)numeric_to_double(dim_result.value.num);
-            if (dim_val < 0) {
-                set_error(state, ERR_ILLEGAL_QUANTITY, "Negative dimension");
+            double dimension = numeric_to_double(dim_result.value.num);
+            if (!isfinite(dimension) || dimension < 0.0 ||
+                dimension >= UINT16_MAX || floor(dimension) != dimension) {
+                set_error(state, ERR_ILLEGAL_QUANTITY, "Invalid array dimension");
                 free(var_token.value.string);
                 return -1;
             }
-            
-            dimensions[dim_count++] = (uint16_t)dim_val;
-            
+            dimensions[dim_count++] = (uint16_t)dimension;
+
             token_t next_token = get_next_token(state, parser_ptr);
-            if (next_token.type == TOKEN_DELIMITER && next_token.value.operator == ',') {
-                continue; // 次の次元へ
-            } else if (next_token.type == TOKEN_DELIMITER && next_token.value.operator == ')') {
-                break; // 次元定義終了
-            } else {
+            if (next_token.type == TOKEN_DELIMITER && next_token.value.operator == ')') {
+                closed = true;
+                break;
+            }
+            if (next_token.type != TOKEN_DELIMITER || next_token.value.operator != ',') {
                 set_error(state, ERR_SYNTAX, ", or ) expected in DIM");
                 free(var_token.value.string);
                 return -1;
             }
         }
-        
-        if (dim_count == 0) {
-            set_error(state, ERR_SYNTAX, "At least one dimension required");
+        if (!closed) {
+            set_error(state, ERR_SYNTAX, "Too many array dimensions");
             free(var_token.value.string);
             return -1;
         }
-        
-        // 配列変数の作成
+
+        uint16_t total_elements = calculate_array_size(dimensions, dim_count);
+        if (total_elements == 0) {
+            set_error(state, ERR_ILLEGAL_QUANTITY, "Array too large");
+            free(var_token.value.string);
+            return -1;
+        }
+
         bool is_string = strchr(var_token.value.string, '$') != NULL;
         variable_type_t var_type = is_string ? VAR_ARRAY_STRING : VAR_ARRAY_NUMERIC;
-        
-        variable_t* array_var = create_variable(state, var_token.value.string, var_type);
-        if (!array_var) {
-            free(var_token.value.string);
-            return -1;
-        }
-        
-        // 配列データの割り当て
-        uint16_t total_elements = calculate_array_size(dimensions, dim_count);
-        
-        array_var->value.array.dimensions = (uint16_t*)malloc(dim_count * sizeof(uint16_t));
-        if (!array_var->value.array.dimensions) {
+        uint16_t* dims_copy = malloc(dim_count * sizeof(*dims_copy));
+        if (!dims_copy) {
             set_error(state, ERR_OUT_OF_MEMORY, NULL);
             free(var_token.value.string);
             return -1;
         }
-        
-        memcpy(array_var->value.array.dimensions, dimensions, dim_count * sizeof(uint16_t));
-        array_var->value.array.dim_count = dim_count;
-        array_var->value.array.total_elements = total_elements;
-        
+        memcpy(dims_copy, dimensions, dim_count * sizeof(*dims_copy));
+
+        void* data = NULL;
         if (is_string) {
-            // 文字列配列
-            char** string_array = (char**)malloc(total_elements * sizeof(char*));
-            if (!string_array) {
-                set_error(state, ERR_OUT_OF_MEMORY, NULL);
-                free(array_var->value.array.dimensions);
-                free(var_token.value.string);
-                return -1;
-            }
-            
-            // 空文字列で初期化
-            for (uint16_t i = 0; i < total_elements; i++) {
-                string_array[i] = (char*)malloc(1);
-                if (string_array[i]) {
-                    string_array[i][0] = '\0';
+            char** values = calloc(total_elements, sizeof(*values));
+            if (values) {
+                data = values;
+                for (uint16_t i = 0; i < total_elements; i++) {
+                    values[i] = malloc(1);
+                    if (!values[i]) break;
+                    values[i][0] = '\0';
+                }
+                for (uint16_t i = 0; i < total_elements; i++) {
+                    if (!values[i]) {
+                        free_array_storage(data, true, total_elements);
+                        data = NULL;
+                        break;
+                    }
                 }
             }
-            
-            array_var->value.array.data = string_array;
         } else {
-            // 数値配列
-            numeric_value_t* numeric_array = (numeric_value_t*)malloc(total_elements * sizeof(numeric_value_t));
-            if (!numeric_array) {
-                set_error(state, ERR_OUT_OF_MEMORY, NULL);
-                free(array_var->value.array.dimensions);
-                free(var_token.value.string);
-                return -1;
+            numeric_value_t* values = malloc((size_t)total_elements * sizeof(*values));
+            if (values) {
+                data = values;
+                for (uint16_t i = 0; i < total_elements; i++)
+                    values[i] = double_to_numeric(0.0);
             }
-            
-            // 0で初期化
-            for (uint16_t i = 0; i < total_elements; i++) {
-                numeric_array[i] = double_to_numeric(0.0);
-            }
-            
-            array_var->value.array.data = numeric_array;
         }
-        
+        if (!data) {
+            free(dims_copy);
+            free(var_token.value.string);
+            set_error(state, ERR_OUT_OF_MEMORY, NULL);
+            return -1;
+        }
+
+        // すべての確保に成功してから変数リストに登録する。
+        variable_t* array_var = create_variable(state, var_token.value.string, var_type);
+        if (!array_var) {
+            free_array_storage(data, is_string, total_elements);
+            free(dims_copy);
+            free(var_token.value.string);
+            return -1;
+        }
+        array_var->value.array.dimensions = dims_copy;
+        array_var->value.array.dim_count = dim_count;
+        array_var->value.array.total_elements = total_elements;
+        array_var->value.array.data = data;
         free(var_token.value.string);
-        
-        // 次の変数があるかチェック
+
         token_t next_token = get_next_token(state, parser_ptr);
-        if (next_token.type == TOKEN_DELIMITER && next_token.value.operator == ',') {
-            continue; // 次の変数へ
-        } else {
-            break; // DIM文終了
-        }
+        if (next_token.type != TOKEN_DELIMITER || next_token.value.operator != ',')
+            break;
     }
-    
     return 0;
 }
 
@@ -200,7 +199,7 @@ eval_result_t access_array_element(basic_state_t* state, const char* var_name,
     
     uint16_t array_index = calculate_array_index(var->value.array.dimensions, 
                                                 var->value.array.dim_count, indices);
-    if (array_index == 0xFFFF) {
+    if (array_index == UINT16_MAX || array_index >= var->value.array.total_elements) {
         set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
         return result;
     }
@@ -235,7 +234,7 @@ int assign_array_element(basic_state_t* state, const char* var_name,
     
     uint16_t array_index = calculate_array_index(var->value.array.dimensions, 
                                                 var->value.array.dim_count, indices);
-    if (array_index == 0xFFFF) {
+    if (array_index == UINT16_MAX || array_index >= var->value.array.total_elements) {
         set_error(state, ERR_SUBSCRIPT_OUT_OF_RANGE, NULL);
         return -1;
     }
