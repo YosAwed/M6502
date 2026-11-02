@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -g -O2
+CFLAGS = -Wall -Wextra -std=c99 -g -O2 -D_POSIX_C_SOURCE=199309L
 INCLUDES = -I.
 LIBS = -lm
 
