@@ -23,6 +23,8 @@ class CoreRegressionsTest(unittest.TestCase):
             result.returncode, 0,
             f"exit={result.returncode}\n{result.stdout}\n{result.stderr}",
         )
+        # UBSanは診断を出しても終了コード0を返す場合がある。
+        self.assertEqual(result.stderr, "", result.stderr)
         return result.stdout.replace("] ", "")
 
     def test_delete_stopped_line_invalidates_continuation(self):

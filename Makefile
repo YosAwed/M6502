@@ -11,7 +11,7 @@ COMMON_CFLAGS = -Wall -Wextra -std=c99
 ifeq ($(PROFILE),asan)
 OBJDIR = obj-asan
 TARGET = basic-asan
-PROFILE_CFLAGS = -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined
+PROFILE_CFLAGS = -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=undefined
 PROFILE_LDFLAGS = -fsanitize=address,undefined
 else ifeq ($(PROFILE),release)
 OBJDIR = obj
