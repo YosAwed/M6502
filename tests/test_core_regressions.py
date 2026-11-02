@@ -55,6 +55,15 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertIn("Unterminated string", output)
         self.assertIn("7\n", output)
 
+    def test_compound_comparisons_with_spaces(self):
+        output = self.run_basic(
+            "PRINT 1 <= 1\nPRINT 1 >= 1\nPRINT 1 <> 2\nPRINT 2<>2"
+        )
+        self.assertNotIn("?", output)
+        self.assertIn("-1\n", output)
+        self.assertEqual(output.count("-1\n"), 3, output)
+        self.assertIn("0\n", output)
+
 
 if __name__ == "__main__":
     unittest.main()
