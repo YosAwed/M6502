@@ -36,8 +36,14 @@ void basic_cleanup(basic_state_t* state) {
         if (var->type == VAR_STRING && var->value.str.data) {
             free(var->value.str.data);
         } else if (var->type == VAR_ARRAY_NUMERIC || var->type == VAR_ARRAY_STRING) {
-            if (var->value.array.data) free(var->value.array.data);
-            if (var->value.array.dimensions) free(var->value.array.dimensions);
+            if (var->type == VAR_ARRAY_STRING && var->value.array.data) {
+                // 文字列配列の各要素も個別に確保されている。
+                char** values = (char**)var->value.array.data;
+                for (uint16_t i = 0; i < var->value.array.total_elements; i++)
+                    free(values[i]);
+            }
+            free(var->value.array.data);
+            free(var->value.array.dimensions);
         }
         free(var);
         var = next;

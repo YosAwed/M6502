@@ -64,6 +64,25 @@ class CoreRegressionsTest(unittest.TestCase):
         self.assertEqual(output.count("-1\n"), 3, output)
         self.assertIn("0\n", output)
 
+    def test_string_array_clear_releases_elements(self):
+        output = self.run_basic(
+            'DIM A$(2)\nA$(0)="X"\nA$(1)="Y"\nCLEAR\nPRINT 7'
+        )
+        self.assertNotIn("?", output)
+        self.assertIn("7\n", output)
+
+    def test_string_array_new_releases_elements(self):
+        output = self.run_basic(
+            'DIM A$(2)\nA$(1)="HELLO"\nNEW\nPRINT 7'
+        )
+        self.assertNotIn("?", output)
+        self.assertIn("7\n", output)
+
+    def test_string_array_process_exit_releases_elements(self):
+        output = self.run_basic('DIM A$(2)\nA$(1)="HELLO"\nPRINT 7')
+        self.assertNotIn("?", output)
+        self.assertIn("7\n", output)
+
 
 if __name__ == "__main__":
     unittest.main()
